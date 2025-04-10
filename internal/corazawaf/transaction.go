@@ -1498,11 +1498,8 @@ func (tx *Transaction) AuditLog() *auditlog.Log {
 				Stopwatch_:  tx.GetStopWatch(),
 				Rulesets_:   tx.WAF.ComponentNames,
 			}
-<<<<<<< HEAD
 		case types.AuditLogPartRulesMatched:
 			auditLogPartRulesMatchedSet = true
-=======
->>>>>>> origin/beta
 			for _, mr := range tx.matchedRules {
 				// Log action is required to log a matched rule on both error log and audit log
 				// An assertion has to be done to check if the MatchedRule implements the Log() function before calling Log()
@@ -1538,11 +1535,8 @@ func (tx *Transaction) AuditLog() *auditlog.Log {
 					}
 				}
 			}
-		case types.AuditLogPartRulesMatched:
-			// implement matched rules
 		}
 	}
-
 	// If AuditLogPartRulesMatched (K) is not set, but AuditLogPartAuditLogTrailer (H) is set, we still expect to
 	// log the error messages emitted by the rules (if the rule has Log set to true)
 	if !auditLogPartRulesMatchedSet && auditLogPartAuditLogTrailerSet {
