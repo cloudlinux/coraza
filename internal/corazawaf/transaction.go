@@ -514,9 +514,7 @@ func (tx *Transaction) MatchRule(r *Rule, mds []types.MatchData) {
 	// tx.MatchedRules = append(tx.MatchedRules, mr)
 
 	// If the rule is set to audit, we log the transaction to the audit log
-	if r.Audit {
-		tx.audit = true
-	}
+	tx.audit = r.Audit
 
 	// set highest_severity
 	hs := tx.variables.highestSeverity
@@ -532,6 +530,7 @@ func (tx *Transaction) MatchRule(r *Rule, mds []types.MatchData) {
 		ClientIPAddress_: tx.variables.remoteAddr.Get(),
 		Rule_:            &r.RuleMetadata,
 		Log_:             r.Log,
+		Audit_:           tx.audit,
 		MatchedDatas_:    mds,
 		Context_:         tx.context,
 	}
@@ -564,7 +563,6 @@ func (tx *Transaction) MatchRule(r *Rule, mds []types.MatchData) {
 	if tx.WAF.ErrorLogCb != nil && r.Log {
 		tx.WAF.ErrorLogCb(mr)
 	}
-
 }
 
 // GetStopWatch is used to debug phase durations
@@ -1508,7 +1506,7 @@ func (tx *Transaction) AuditLog() *auditlog.Log {
 				// An assertion has to be done to check if the MatchedRule implements the Log() function before calling Log()
 				// It is performed to avoid breaking the Coraza v3.* API adding a Log() method to the MatchedRule interface
 				mrWithlog, ok := mr.(*corazarules.MatchedRule)
-				if ok && mrWithlog.Log() {
+				if ok && (mrWithlog.Log() || mrWithlog.Audit()) {
 					r := mr.Rule()
 					for _, matchData := range mr.MatchedDatas() {
 						newAlEntry := auditlog.Message{
@@ -1546,7 +1544,7 @@ func (tx *Transaction) AuditLog() *auditlog.Log {
 	if !auditLogPartRulesMatchedSet && auditLogPartAuditLogTrailerSet {
 		for _, mr := range tx.matchedRules {
 			mrWithlog, ok := mr.(*corazarules.MatchedRule)
-			if ok && mrWithlog.Log() {
+			if ok && (mrWithlog.Log() || mrWithlog.Audit()) {
 				al.Messages_ = append(al.Messages_, auditlog.Message{
 					ErrorMessage_: mr.ErrorLog(),
 				})
