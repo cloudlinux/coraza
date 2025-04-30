@@ -183,7 +183,7 @@ func TestAuditLogRelevantOnlyNoAuditlog(t *testing.T) {
 	}
 }
 
-func TestAuditLogOnNoLog(t *testing.T) {
+func TestAuditLogOnWithNoLog(t *testing.T) {
 	waf := corazawaf.NewWAF()
 	parser := seclang.NewParser(waf)
 	if err := parser.FromString(`
@@ -378,6 +378,8 @@ func TestAuditLogRequestBody(t *testing.T) {
 	}
 }
 
+// Arule expected to be logged (log and auditlog flags enabled) should
+// print the error message in the audit log as part of the H section.
 func TestAuditLogHFlag(t *testing.T) {
 	waf := corazawaf.NewWAF()
 	parser := seclang.NewParser(waf)
@@ -386,10 +388,10 @@ func TestAuditLogHFlag(t *testing.T) {
 		SecAuditEngine On
 		SecAuditLogFormat json
 		SecAuditLogType serial
-		SecAuditLogParts ABCHZ
+		SecAuditLogParts AHZ
 		SecAuditLogRelevantStatus ".*"
-		# auditlog should contain messages section on H flag included
-		SecRule ARGS "@unconditionalMatch" "id:1,phase:1,log,auditlog,msg:'unconditional match'"
+		# An audit log should contain messages section on H flag included
+		SecRule ARGS "@unconditionalMatch" "id:1,phase:1,log,auditlog,msg:'expected rule message'"
 	`); err != nil {
 		t.Fatal(err)
 	}
@@ -417,12 +419,18 @@ func TestAuditLogHFlag(t *testing.T) {
 	if len(al.Messages()) != 1 {
 		t.Fatalf("Expected 1 message, got %d", len(al.Messages()))
 	}
-	if al.Messages()[0].Message() != "unconditional match" {
-		t.Errorf("Expected message %q, got %q", "unconditional match", al.Messages()[0].Message())
+	type auditLogWithErrMesg interface{ ErrorMessage() string }
+	alWithErrMsg, ok := al.Messages()[0].(auditLogWithErrMesg)
+	if !ok {
+		t.Fatalf("Expected message to be of type auditLogWithErrMesg")
+	}
+	expected := "expected rule message"
+	if !strings.Contains(alWithErrMsg.ErrorMessage(), expected) {
+		t.Errorf("Expected audit log to contain %q, got %q", expected, alWithErrMsg.ErrorMessage())
 	}
 }
 
-func TestAuditLogNoHFlag(t *testing.T) {
+func TestAuditLogWithKFlagWithoutHFlag(t *testing.T) {
 	waf := corazawaf.NewWAF()
 	parser := seclang.NewParser(waf)
 	if err := parser.FromString(`
@@ -432,8 +440,8 @@ func TestAuditLogNoHFlag(t *testing.T) {
 		SecAuditLogType serial
 		SecAuditLogParts ABCKZ
 		SecAuditLogRelevantStatus ".*"
-		# auditlog should not contain messages section without H flag included, but should contain Rule below
-		SecRule ARGS "@unconditionalMatch" "id:1,phase:1,log,auditlog,msg:'nolog message'"
+		# auditlog should not contain error logs without H flag included
+		SecRule ARGS "@unconditionalMatch" "id:1,phase:1,log,auditlog,msg:'unexpected logged message'"
 	`); err != nil {
 		t.Fatal(err)
 	}
@@ -458,7 +466,16 @@ func TestAuditLogNoHFlag(t *testing.T) {
 	if err := json.NewDecoder(file).Decode(&al); err != nil {
 		t.Error(err)
 	}
-	if len(al.Messages()) > 0 {
-		t.Fatalf("expected no messages got %d", len(al.Messages()))
+	if len(al.Messages()) != 1 {
+		t.Fatalf("Expected 1 message, got %d", len(al.Messages()))
+	}
+	type auditLogWithErrMesg interface{ ErrorMessage() string }
+	alWithErrMsg, ok := al.Messages()[0].(auditLogWithErrMesg)
+	if !ok {
+		t.Fatalf("Expected message to be of type auditLogWithErrMesg")
+	}
+	notExpected := "unexpected logged message"
+	if strings.Contains(alWithErrMsg.ErrorMessage(), notExpected) {
+		t.Errorf("Not expected audit log to contain %q, got %q", notExpected, alWithErrMsg.ErrorMessage())
 	}
 }

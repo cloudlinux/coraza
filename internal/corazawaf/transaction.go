@@ -21,6 +21,7 @@ import (
 	"github.com/corazawaf/coraza/v3/collection"
 	"github.com/corazawaf/coraza/v3/debuglog"
 	"github.com/corazawaf/coraza/v3/experimental/plugins/plugintypes"
+	"github.com/corazawaf/coraza/v3/experimental/rulefilter/rftypes"
 	"github.com/corazawaf/coraza/v3/internal/auditlog"
 	"github.com/corazawaf/coraza/v3/internal/bodyprocessors"
 	"github.com/corazawaf/coraza/v3/internal/collections"
@@ -123,6 +124,10 @@ type Transaction struct {
 	variables TransactionVariables
 
 	transformationCache map[transformationKey]*transformationValue
+
+	// ruleFilter allows applying custom rule filtering logic per transaction.
+	// If set, it's used during rule evaluation to determine if a rule should be skipped.
+	ruleFilter rftypes.RuleFilter
 }
 
 func (tx *Transaction) ID() string {
@@ -763,7 +768,7 @@ func (tx *Transaction) ProcessURI(uri string, method string, httpVersion string)
 		uri = uri[:in]
 	}
 	path := ""
-	parsedURL, err := url.Parse(uri)
+	parsedURL, err := url.ParseRequestURI(uri)
 	query := ""
 	if err != nil {
 		tx.variables.urlencodedError.Set(err.Error())
@@ -1432,6 +1437,7 @@ func (tx *Transaction) AuditLog() *auditlog.Log {
 		IsInterrupted_: tx.IsInterrupted(),
 	}
 
+	var auditLogPartAuditLogTrailerSet, auditLogPartRulesMatchedSet bool
 	for _, part := range tx.AuditLogParts {
 		switch part {
 		case types.AuditLogPartRequestHeaders:
@@ -1484,6 +1490,7 @@ func (tx *Transaction) AuditLog() *auditlog.Log {
 			al.Transaction_.Response_.Status_ = status
 			al.Transaction_.Response_.Headers_ = tx.variables.responseHeaders.Data()
 		case types.AuditLogPartAuditLogTrailer:
+			auditLogPartAuditLogTrailerSet = true
 			al.Transaction_.Producer_ = &auditlog.TransactionProducer{
 				Connector_:  tx.WAF.ProducerConnector,
 				Version_:    tx.WAF.ProducerConnectorVersion,
@@ -1492,15 +1499,17 @@ func (tx *Transaction) AuditLog() *auditlog.Log {
 				Stopwatch_:  tx.GetStopWatch(),
 				Rulesets_:   tx.WAF.ComponentNames,
 			}
+		case types.AuditLogPartRulesMatched:
+			auditLogPartRulesMatchedSet = true
 			for _, mr := range tx.matchedRules {
 				// Log action is required to log a matched rule on both error log and audit log
 				// An assertion has to be done to check if the MatchedRule implements the Log() function before calling Log()
 				// It is performed to avoid breaking the Coraza v3.* API adding a Log() method to the MatchedRule interface
 				mrWithlog, ok := mr.(*corazarules.MatchedRule)
-				if ok && mrWithlog.Audit() {
+				if ok && (mrWithlog.Log() || mrWithlog.Audit()) {
 					r := mr.Rule()
 					for _, matchData := range mr.MatchedDatas() {
-						al.Messages_ = append(al.Messages_, auditlog.Message{
+						newAlEntry := auditlog.Message{
 							Actionset_: strings.Join(tx.WAF.ComponentNames, " "),
 							Message_:   matchData.Message(),
 							Data_: &auditlog.MessageData{
@@ -1517,13 +1526,31 @@ func (tx *Transaction) AuditLog() *auditlog.Log {
 								Tags_:     r.Tags(),
 								Raw_:      r.Raw(),
 							},
-						})
+						}
+						// If AuditLogPartAuditLogTrailer (H) is set, we expect to log the error messages emitted by the rules
+						// in the audit log
+						if auditLogPartAuditLogTrailerSet {
+							newAlEntry.ErrorMessage_ = mr.ErrorLog()
+						}
+						al.Messages_ = append(al.Messages_, newAlEntry)
 					}
 				}
 			}
-		case types.AuditLogPartRulesMatched:
-			// implement matched rules
 		}
+	}
+
+	// If AuditLogPartRulesMatched (K) is not set, but AuditLogPartAuditLogTrailer (H) is set, we still expect to
+	// log the error messages emitted by the rules (if the rule has Log set to true)
+	if !auditLogPartRulesMatchedSet && auditLogPartAuditLogTrailerSet {
+		for _, mr := range tx.matchedRules {
+			mrWithlog, ok := mr.(*corazarules.MatchedRule)
+			if ok && (mrWithlog.Log() || mrWithlog.Audit()) {
+				al.Messages_ = append(al.Messages_, auditlog.Message{
+					ErrorMessage_: mr.ErrorLog(),
+				})
+			}
+		}
+
 	}
 
 	return al
@@ -1572,6 +1599,13 @@ func (tx *Transaction) Close() error {
 	}
 
 	return fmt.Errorf("transaction close failed: %v", errors.Join(errs...))
+}
+
+// SetRuleFilter applies a RuleFilter to the transaction.
+// This filter will be consulted during rule evaluation in each phase
+// to determine if specific rules should be skipped for this transaction.
+func (tx *Transaction) SetRuleFilter(filter rftypes.RuleFilter) {
+	tx.ruleFilter = filter
 }
 
 // String will return a string with the transaction debug information
