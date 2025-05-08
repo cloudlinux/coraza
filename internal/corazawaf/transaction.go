@@ -1545,9 +1545,32 @@ func (tx *Transaction) AuditLog() *auditlog.Log {
 		for _, mr := range tx.matchedRules {
 			mrWithlog, ok := mr.(*corazarules.MatchedRule)
 			if ok && (mrWithlog.Log() || mrWithlog.Audit()) {
-				al.Messages_ = append(al.Messages_, auditlog.Message{
-					ErrorMessage_: mr.ErrorLog(),
-				})
+				// In v3, every rule hit is serialized as a JSON object (with message + details) inside audit_data.messages.
+				// Part K does not exist in v3 - all matched rule metadata is provided through part H -> messages[].
+				// It seems the upstream has broken this compatibility, so we're re-adding it here.
+				// The implementation is intentionally kept simple to ease future upstream pulls if the issue gets fixed.
+				r := mr.Rule()
+				for _, matchData := range mr.MatchedDatas() {
+					al.Messages_ = append(al.Messages_, auditlog.Message{
+						Actionset_: strings.Join(tx.WAF.ComponentNames, " "),
+						Message_:   matchData.Message(),
+						Data_: &auditlog.MessageData{
+							File_:     mr.Rule().File(),
+							Line_:     mr.Rule().Line(),
+							ID_:       r.ID(),
+							Rev_:      r.Revision(),
+							Msg_:      matchData.Message(),
+							Data_:     matchData.Data(),
+							Severity_: r.Severity(),
+							Ver_:      r.Version(),
+							Maturity_: r.Maturity(),
+							Accuracy_: r.Accuracy(),
+							Tags_:     r.Tags(),
+							Raw_:      r.Raw(),
+						},
+						ErrorMessage_: mr.ErrorLog(),
+					})
+				}
 			}
 		}
 
