@@ -1545,9 +1545,28 @@ func (tx *Transaction) AuditLog() *auditlog.Log {
 		for _, mr := range tx.matchedRules {
 			mrWithlog, ok := mr.(*corazarules.MatchedRule)
 			if ok && (mrWithlog.Log() || mrWithlog.Audit()) {
-				al.Messages_ = append(al.Messages_, auditlog.Message{
-					ErrorMessage_: mr.ErrorLog(),
-				})
+				r := mr.Rule()
+				for _, matchData := range mr.MatchedDatas() {
+					al.Messages_ = append(al.Messages_, auditlog.Message{
+						Actionset_: strings.Join(tx.WAF.ComponentNames, " "),
+						Message_:   matchData.Message(),
+						Data_: &auditlog.MessageData{
+							File_:     mr.Rule().File(),
+							Line_:     mr.Rule().Line(),
+							ID_:       r.ID(),
+							Rev_:      r.Revision(),
+							Msg_:      matchData.Message(),
+							Data_:     matchData.Data(),
+							Severity_: r.Severity(),
+							Ver_:      r.Version(),
+							Maturity_: r.Maturity(),
+							Accuracy_: r.Accuracy(),
+							Tags_:     r.Tags(),
+							Raw_:      r.Raw(),
+						},
+						ErrorMessage_: mr.ErrorLog(),
+					})
+				}
 			}
 		}
 
