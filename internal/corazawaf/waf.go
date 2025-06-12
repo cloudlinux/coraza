@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/corazawaf/coraza/v3/experimental/persistance/ptypes"
 	"io"
 	"io/fs"
 	"os"
@@ -135,6 +136,8 @@ type WAF struct {
 
 	// Configures the maximum number of ARGS that will be accepted for processing.
 	ArgumentLimit int
+
+	persistenceEngine ptypes.PersistentEngine
 }
 
 // Options is used to pass options to the WAF instance
@@ -420,4 +423,8 @@ func (w *WAF) Validate() error {
 	}
 
 	return nil
+}
+
+func (w *WAF) SetPersistenceEngine(engine ptypes.PersistentEngine) {
+	w.persistenceEngine = engine
 }

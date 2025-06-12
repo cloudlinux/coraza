@@ -4,6 +4,8 @@
 package coraza
 
 import (
+	"github.com/corazawaf/coraza/v3/experimental/persistance/ptypes"
+	"github.com/corazawaf/coraza/v3/internal/presistance"
 	"io/fs"
 
 	"github.com/corazawaf/coraza/v3/debuglog"
@@ -67,7 +69,7 @@ type WAFConfig interface {
 
 // NewWAFConfig creates a new WAFConfig with the default settings.
 func NewWAFConfig() WAFConfig {
-	return &wafConfig{}
+	return &wafConfig{persistenceEngine: &presistance.NoopEngine{}}
 }
 
 // AuditLogConfig controls audit logging.
@@ -105,6 +107,7 @@ type wafConfig struct {
 	debugLogger              debuglog.Logger
 	errorCallback            func(rule types.MatchedRule)
 	fsRoot                   fs.FS
+	persistenceEngine        ptypes.PersistentEngine
 }
 
 func (c *wafConfig) WithRules(rules ...*corazawaf.Rule) WAFConfig {
@@ -190,6 +193,12 @@ func (c *wafConfig) WithResponseBodyLimit(limit int) WAFConfig {
 func (c *wafConfig) WithResponseBodyMimeTypes(mimeTypes []string) WAFConfig {
 	ret := c.clone()
 	ret.responseBodyMimeTypes = mimeTypes
+	return ret
+}
+
+func (c *wafConfig) WithPersistenceEngine(persistenceEngine ptypes.PersistentEngine) WAFConfig {
+	ret := c.clone()
+	ret.persistenceEngine = persistenceEngine
 	return ret
 }
 

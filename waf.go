@@ -73,6 +73,8 @@ func NewWAF(config WAFConfig) (WAF, error) {
 		return nil, fmt.Errorf("invalid WAF config from audit log: %w", err)
 	}
 
+	waf.SetPersistenceEngine(c.persistenceEngine)
+
 	if c.requestBodyAccess {
 		waf.RequestBodyAccess = true
 	}

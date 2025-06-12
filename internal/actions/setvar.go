@@ -5,6 +5,7 @@ package actions
 
 import (
 	"errors"
+	utils "github.com/corazawaf/coraza/v3/internal/strings"
 	"strconv"
 	"strings"
 
@@ -76,11 +77,13 @@ func (a *setvarFn) Init(_ plugintypes.RuleMetadata, data string) error {
 	colKey, colVal, colOk := strings.Cut(key, ".")
 	// Right not it only makes sense to allow setting TX
 	// key is also required
-	if strings.ToUpper(colKey) != "TX" {
-		return errors.New("invalid arguments, expected collection TX")
+	available := []string{"TX", "USER", "GLOBAL", "RESOURCE", "SESSION", "IP"}
+	// we validate uppercase colKey is one of available
+	if !utils.InSlice(strings.ToUpper(colKey), available) {
+		return errors.New("setvar: invalid editable collection, available collections are: " + strings.Join(available, ", "))
 	}
 	if strings.TrimSpace(colVal) == "" {
-		return errors.New("invalid arguments, expected syntax TX.{key}={value}")
+		return errors.New("invalid arguments, expected syntax {key}={value}")
 	}
 	a.collection, err = variables.Parse(colKey)
 	if err != nil {
@@ -111,7 +114,7 @@ func (a *setvarFn) Evaluate(r plugintypes.RuleMetadata, tx plugintypes.Transacti
 		Str("var_key", key).
 		Str("var_value", value).
 		Int("rule_id", r.ID()).
-		Msg("Action evaluated")
+		Msg("Action SetVar evaluated")
 	a.evaluateTxCollection(r, tx, strings.ToLower(key), value)
 }
 
@@ -120,38 +123,48 @@ func (a *setvarFn) Type() plugintypes.ActionType {
 }
 
 func (a *setvarFn) evaluateTxCollection(r plugintypes.RuleMetadata, tx plugintypes.TransactionState, key string, value string) {
-	var col collection.Map
-	if c, ok := tx.Collection(a.collection).(collection.Map); !ok {
-		tx.DebugLogger().Error().Msg("collection in setvar is not a map")
-		return
-	} else {
-		col = c
-	}
-	if col == nil {
-		tx.DebugLogger().Error().Msg("collection in setvar is nil")
-		return
-	}
+	col := tx.Collection(a.collection)
 
-	if a.isRemove {
-		col.Remove(key)
-		return
-	}
-	currentVal := ""
-	if r := col.Get(key); len(r) > 0 {
-		currentVal = r[0]
-	}
-	var err error
-	switch {
-	case len(value) == 0:
-		// if nothing to input
-		col.Set(key, []string{""})
-	// Check if this could be an arithemetic operation. If it is followed by a number, it will be treated as an arithmetic operation. Otherwise, it will be treated as a string.
-	case value[0] == '+', value[0] == '-':
-		val := 0
-		if len(value) > 1 {
-			val, err = strconv.Atoi(value[1:])
+	switch c := col.(type) {
+	case collection.Persistent:
+		tx.DebugLogger().Debug().Msg("Handling setvar for a Persistent collection")
+		if a.isRemove {
+			c.Remove(key)
+			return
+		}
+
+		if len(value) > 0 && (value[0] == '+' || value[0] == '-') {
+			val, err := strconv.Atoi(value[1:])
 			if err != nil {
-				// If the variable doesn't exist, we would need to raise an error. Otherwise, it should be the same value.
+				// Not a valid number after +/-. Treat as a regular string set.
+				c.SetOne(key, value)
+				return
+			}
+			if value[0] == '-' {
+				val = -val
+			}
+			c.Sum(key, val)
+		} else {
+			c.SetOne(key, value)
+		}
+
+	case collection.Map:
+		// Logic for Map collections - tx only
+		tx.DebugLogger().Debug().Msg("Handling setvar for a Map collection")
+		if a.isRemove {
+			c.Remove(key)
+			return
+		}
+
+		currentVal := ""
+		if r := c.Get(key); len(r) > 0 {
+			currentVal = r[0]
+		}
+
+		switch {
+		case len(value) > 0 && (value[0] == '+' || value[0] == '-'):
+			val, err := strconv.Atoi(value[1:])
+			if err != nil {
 				if strings.HasPrefix(value[1:], "tx.") {
 					tx.DebugLogger().Error().
 						Str("var_value", value).
@@ -160,30 +173,34 @@ func (a *setvarFn) evaluateTxCollection(r plugintypes.RuleMetadata, tx plugintyp
 						Msg(value)
 					return
 				}
+				c.Set(key, []string{value})
+				return
+			}
 
-				col.Set(key, []string{value})
-				return
+			currentValInt := 0
+			if currentVal != "" {
+				currentValInt, err = strconv.Atoi(currentVal)
+				if err != nil {
+					tx.DebugLogger().Error().
+						Str("var_key", currentVal).
+						Int("rule_id", r.ID()).
+						Err(err).
+						Msg("Invalid value")
+					return
+				}
 			}
-		}
-		currentValInt := 0
-		if currentVal != "" {
-			currentValInt, err = strconv.Atoi(currentVal)
-			if err != nil {
-				tx.DebugLogger().Error().
-					Str("var_key", currentVal).
-					Int("rule_id", r.ID()).
-					Err(err).
-					Msg("Invalid value")
-				return
+
+			if value[0] == '+' {
+				c.Set(key, []string{strconv.Itoa(currentValInt + val)})
+			} else {
+				c.Set(key, []string{strconv.Itoa(currentValInt - val)})
 			}
+		default:
+			c.Set(key, []string{value})
 		}
-		if value[0] == '+' {
-			col.Set(key, []string{strconv.Itoa(currentValInt + val)})
-		} else {
-			col.Set(key, []string{strconv.Itoa(currentValInt - val)})
-		}
+
 	default:
-		col.Set(key, []string{value})
+		tx.DebugLogger().Error().Msg("setvar: collection is not a supported editable type (Persistent or Map)")
 	}
 }
 
