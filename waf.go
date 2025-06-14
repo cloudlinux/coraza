@@ -6,6 +6,7 @@ package coraza
 import (
 	"context"
 	"fmt"
+	"github.com/corazawaf/coraza/v3/experimental/persistance/ptypes"
 	"strings"
 
 	"github.com/corazawaf/coraza/v3/experimental"
@@ -67,13 +68,23 @@ func NewWAF(config WAFConfig) (WAF, error) {
 		}
 	}
 
+	var engine ptypes.PersistentEngine
+	var err error
+
+	if c.persistenceEngineProvider != nil {
+		engine, err = c.persistenceEngineProvider()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create persistence engine: %w", err)
+		}
+	}
+
+	waf.SetPersistenceEngine(engine)
+
 	populateAuditLog(waf, c)
 
 	if err := waf.InitAuditLogWriter(); err != nil {
 		return nil, fmt.Errorf("invalid WAF config from audit log: %w", err)
 	}
-
-	waf.SetPersistenceEngine(c.persistenceEngine)
 
 	if c.requestBodyAccess {
 		waf.RequestBodyAccess = true

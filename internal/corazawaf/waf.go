@@ -137,6 +137,7 @@ type WAF struct {
 	// Configures the maximum number of ARGS that will be accepted for processing.
 	ArgumentLimit int
 
+	// Used for storing and retrieving persistent collection data (e.g., SESSION, IP, GLOBAL)
 	persistenceEngine ptypes.PersistentEngine
 }
 
@@ -425,6 +426,8 @@ func (w *WAF) Validate() error {
 	return nil
 }
 
+// SetPersistenceEngine sets the agent used for storing and retrieving
+// persistent collection data (e.g., SESSION, IP, GLOBAL)
 func (w *WAF) SetPersistenceEngine(engine ptypes.PersistentEngine) {
 	w.persistenceEngine = engine
 }

@@ -15,6 +15,8 @@ import (
 	"github.com/corazawaf/coraza/v3/types/variables"
 )
 
+var supportedColKeys = []string{"TX", "USER", "GLOBAL", "RESOURCE", "SESSION", "IP"}
+
 // Action Group: Non-disruptive
 //
 // Description:
@@ -77,10 +79,9 @@ func (a *setvarFn) Init(_ plugintypes.RuleMetadata, data string) error {
 	colKey, colVal, colOk := strings.Cut(key, ".")
 	// Right not it only makes sense to allow setting TX
 	// key is also required
-	available := []string{"TX", "USER", "GLOBAL", "RESOURCE", "SESSION", "IP"}
-	// we validate uppercase colKey is one of available
-	if !utils.InSlice(strings.ToUpper(colKey), available) {
-		return errors.New("setvar: invalid editable collection, available collections are: " + strings.Join(available, ", "))
+	// we validate uppercase colKey is one of supported
+	if !utils.InSlice(strings.ToUpper(colKey), supportedColKeys) {
+		return errors.New("setvar: invalid editable collection, supported collections are: " + strings.Join(supportedColKeys, ", "))
 	}
 	if strings.TrimSpace(colVal) == "" {
 		return errors.New("invalid arguments, expected syntax {key}={value}")

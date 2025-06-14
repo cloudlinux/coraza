@@ -1,6 +1,11 @@
 package ptypes
 
-// Engine defines the interface for storing and retrieving persistent collection data (e.g., SESSION, IP, GLOBAL).
+// PersistenceEngineProvider provider for creation of PersistentEngine.
+// This way we don't have to worry about cloning when using
+// WithPersistenceEngineProvider in config.go
+type PersistenceEngineProvider func() (PersistentEngine, error)
+
+// PersistentEngine defines the interface for storing and retrieving persistent collection data (e.g., SESSION, IP, GLOBAL).
 type PersistentEngine interface {
 	Init() error
 	// Close releases engine resources.

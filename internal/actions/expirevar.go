@@ -48,9 +48,8 @@ func (a *expirevarFn) Init(_ plugintypes.RuleMetadata, data string) error {
 	colKey, colVal, colOk := strings.Cut(key, ".")
 
 	// Ensure the collection is one of the editable ones
-	available := []string{"TX", "USER", "GLOBAL", "RESOURCE", "SESSION", "IP"}
-	if !utils.InSlice(strings.ToUpper(colKey), available) {
-		return errors.New("invalid collection, available collections are: " + strings.Join(available, ", "))
+	if !utils.InSlice(strings.ToUpper(colKey), supportedColKeys) {
+		return errors.New("invalid collection, supported collections are: " + strings.Join(supportedColKeys, ", "))
 	}
 	if strings.TrimSpace(colVal) == "" {
 		return ErrInvalidKVArguments

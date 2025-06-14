@@ -5,7 +5,6 @@ package coraza
 
 import (
 	"github.com/corazawaf/coraza/v3/experimental/persistance/ptypes"
-	"github.com/corazawaf/coraza/v3/internal/presistance"
 	"io/fs"
 
 	"github.com/corazawaf/coraza/v3/debuglog"
@@ -69,7 +68,7 @@ type WAFConfig interface {
 
 // NewWAFConfig creates a new WAFConfig with the default settings.
 func NewWAFConfig() WAFConfig {
-	return &wafConfig{persistenceEngine: &presistance.NoopEngine{}}
+	return &wafConfig{}
 }
 
 // AuditLogConfig controls audit logging.
@@ -96,18 +95,18 @@ type wafRule struct {
 // int is a signed integer type that is at least 32 bits in size (platform-dependent size).
 // We still basically assume 64-bit usage where int are big sizes.
 type wafConfig struct {
-	rules                    []wafRule
-	auditLog                 *auditLogConfig
-	requestBodyAccess        bool
-	requestBodyLimit         *int
-	requestBodyInMemoryLimit *int
-	responseBodyAccess       bool
-	responseBodyLimit        *int
-	responseBodyMimeTypes    []string
-	debugLogger              debuglog.Logger
-	errorCallback            func(rule types.MatchedRule)
-	fsRoot                   fs.FS
-	persistenceEngine        ptypes.PersistentEngine
+	rules                     []wafRule
+	auditLog                  *auditLogConfig
+	requestBodyAccess         bool
+	requestBodyLimit          *int
+	requestBodyInMemoryLimit  *int
+	responseBodyAccess        bool
+	responseBodyLimit         *int
+	responseBodyMimeTypes     []string
+	debugLogger               debuglog.Logger
+	errorCallback             func(rule types.MatchedRule)
+	fsRoot                    fs.FS
+	persistenceEngineProvider ptypes.PersistenceEngineProvider
 }
 
 func (c *wafConfig) WithRules(rules ...*corazawaf.Rule) WAFConfig {
@@ -196,9 +195,9 @@ func (c *wafConfig) WithResponseBodyMimeTypes(mimeTypes []string) WAFConfig {
 	return ret
 }
 
-func (c *wafConfig) WithPersistenceEngine(persistenceEngine ptypes.PersistentEngine) WAFConfig {
+func (c *wafConfig) WithPersistenceEngineProvider(provider ptypes.PersistenceEngineProvider) WAFConfig {
 	ret := c.clone()
-	ret.persistenceEngine = persistenceEngine
+	ret.persistenceEngineProvider = provider
 	return ret
 }
 

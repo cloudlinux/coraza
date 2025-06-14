@@ -14,6 +14,8 @@ import (
 	"github.com/corazawaf/coraza/v3/types/variables"
 )
 
+var persistenColKeys = []string{"USER", "SESSION", "IP", "RESOURCE", "GLOBAL"}
+
 // Action Group: Non-disruptive
 //
 // Description:
@@ -43,8 +45,7 @@ func (a *initcolFn) Init(_ plugintypes.RuleMetadata, data string) error {
 		return fmt.Errorf("initcol: collection %s is not valid", col)
 	}
 	// we validate if this is a persistent collection
-	persistent := []string{"USER", "SESSION", "IP", "RESOURCE", "GLOBAL"}
-	if !utils.InSlice(c.Name(), persistent) {
+	if !utils.InSlice(c.Name(), persistenColKeys) {
 		return fmt.Errorf("initcol: collection %s is not persistent", c.Name())
 	}
 	a.collection = c
