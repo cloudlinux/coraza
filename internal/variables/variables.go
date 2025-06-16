@@ -228,6 +228,14 @@ const (
 	Userid
 	// IP is kept for compatibility
 	IP
+	// Global is a persistent collection of global variables
+	Global
+	// Resource is a persistent collection of resources
+	Resource
+	// User is a persistent collection of user variables
+	User
+	// Session is a persistent collection of session variables
+	Session
 	// ResBodyError
 	ResBodyError
 	// ResBodyErrorMsg

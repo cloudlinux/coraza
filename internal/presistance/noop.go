@@ -2,10 +2,6 @@ package presistance
 
 type NoopEngine struct{}
 
-func (NoopEngine) Init() error {
-	return nil
-}
-
 func (NoopEngine) Close() error {
 	return nil
 }

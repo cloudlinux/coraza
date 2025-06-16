@@ -7,7 +7,6 @@ type PersistenceEngineProvider func() (PersistentEngine, error)
 
 // PersistentEngine defines the interface for storing and retrieving persistent collection data (e.g., SESSION, IP, GLOBAL).
 type PersistentEngine interface {
-	Init() error
 	// Close releases engine resources.
 	Close() error
 	// Sum increments or decrements a numeric value.

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/corazawaf/coraza/v3/experimental/persistance/ptypes"
+	"github.com/corazawaf/coraza/v3/internal/presistance"
 	"strings"
 
 	"github.com/corazawaf/coraza/v3/experimental"
@@ -76,6 +77,8 @@ func NewWAF(config WAFConfig) (WAF, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to create persistence engine: %w", err)
 		}
+	} else {
+		engine = presistance.NoopEngine{}
 	}
 
 	waf.SetPersistenceEngine(engine)
