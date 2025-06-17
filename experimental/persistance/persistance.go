@@ -31,7 +31,7 @@ func SetEngine(config coraza.WAFConfig, engineProvider ptypes.PersistenceEngineP
 // NOTE: This function and the persistence feature are experimental and subject to change.
 func ClosePersistentEngine(waf coraza.WAF) error {
 	wafImpl, ok := waf.(interface {
-		ClosePersistentEngine() error // Or something similar
+		ClosePersistentEngine() error
 	})
 	if !ok {
 		return fmt.Errorf("unsupported WAF type %T, cannot close engine", waf)
