@@ -229,7 +229,7 @@ func (w *WAF) newTransaction(opts Options) *Transaction {
 			Limit:       w.ResponseBodyLimit,
 		})
 
-		tx.variables = *NewTransactionVariables()
+		tx.variables = *NewTransactionVariables(tx.WAF.persistenceEngine)
 		tx.transformationCache = map[transformationKey]*transformationValue{}
 	}
 
