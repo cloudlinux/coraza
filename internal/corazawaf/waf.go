@@ -147,6 +147,10 @@ type Options struct {
 	Context context.Context
 }
 
+func (w *WAF) ClosePersistentEngine() error {
+	return w.persistenceEngine.Close()
+}
+
 // NewTransaction Creates a new initialized transaction for this WAF instance
 func (w *WAF) NewTransaction() *Transaction {
 	return w.newTransaction(Options{

@@ -19,3 +19,22 @@ func SetEngine(config coraza.WAFConfig, engineProvider ptypes.PersistenceEngineP
 	}
 	return cfgImpl.WithPersistenceEngineProvider(engineProvider), nil
 }
+
+// ClosePersistentEngine provides a way to gracefully shut down the persistence engine
+// associated with a WAF instance. Since the WAF instance manages the engine's lifecycle,
+// this helper should be called when the WAF instance is no longer needed, for example,
+// during an application shutdown or a configuration reload.
+//
+// This allows the engine to release resources, such as database connections or
+// background garbage collection goroutines.
+//
+// NOTE: This function and the persistence feature are experimental and subject to change.
+func ClosePersistentEngine(waf coraza.WAF) error {
+	wafImpl, ok := waf.(interface {
+		ClosePersistentEngine() error // Or something similar
+	})
+	if !ok {
+		return fmt.Errorf("unsupported WAF type %T, cannot close engine", waf)
+	}
+	return wafImpl.ClosePersistentEngine()
+}
