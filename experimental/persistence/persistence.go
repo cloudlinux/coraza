@@ -1,9 +1,9 @@
-package persistance
+package persistence
 
 import (
 	"fmt"
 	"github.com/corazawaf/coraza/v3"
-	"github.com/corazawaf/coraza/v3/experimental/persistance/ptypes"
+	"github.com/corazawaf/coraza/v3/experimental/persistence/ptypes"
 )
 
 // SetEngine returns a **new** WAFConfig instance with the specified persistence engine configured.

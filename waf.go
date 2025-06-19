@@ -6,8 +6,8 @@ package coraza
 import (
 	"context"
 	"fmt"
-	"github.com/corazawaf/coraza/v3/experimental/persistance/ptypes"
-	"github.com/corazawaf/coraza/v3/internal/presistance"
+	"github.com/corazawaf/coraza/v3/experimental/persistence/ptypes"
+	"github.com/corazawaf/coraza/v3/internal/persistence"
 	"strings"
 
 	"github.com/corazawaf/coraza/v3/experimental"
@@ -78,7 +78,7 @@ func NewWAF(config WAFConfig) (WAF, error) {
 			return nil, fmt.Errorf("failed to create persistence engine: %w", err)
 		}
 	} else {
-		engine = presistance.NoopEngine{}
+		engine = persistence.NoopEngine{}
 	}
 
 	waf.SetPersistenceEngine(engine)
@@ -146,6 +146,10 @@ func populateAuditLog(waf *corazawaf.WAF, c *wafConfig) {
 
 type wafWrapper struct {
 	waf *corazawaf.WAF
+}
+
+func (w wafWrapper) ClosePersistentEngine() error {
+	return w.waf.ClosePersistentEngine()
 }
 
 // NewTransaction implements the same method on WAF.

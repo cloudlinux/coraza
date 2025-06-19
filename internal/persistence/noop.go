@@ -1,4 +1,4 @@
-package presistance
+package persistence
 
 type NoopEngine struct{}
 

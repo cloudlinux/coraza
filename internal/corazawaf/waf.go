@@ -7,7 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/corazawaf/coraza/v3/experimental/persistance/ptypes"
+	"github.com/corazawaf/coraza/v3/experimental/persistence/ptypes"
 	"io"
 	"io/fs"
 	"os"

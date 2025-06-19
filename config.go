@@ -4,7 +4,7 @@
 package coraza
 
 import (
-	"github.com/corazawaf/coraza/v3/experimental/persistance/ptypes"
+	"github.com/corazawaf/coraza/v3/experimental/persistence/ptypes"
 	"io/fs"
 
 	"github.com/corazawaf/coraza/v3/debuglog"
