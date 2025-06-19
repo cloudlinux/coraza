@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/corazawaf/coraza/v3/experimental/persistence/ptypes"
 	"io"
 	"io/fs"
 	"os"
@@ -135,12 +136,19 @@ type WAF struct {
 
 	// Configures the maximum number of ARGS that will be accepted for processing.
 	ArgumentLimit int
+
+	// Used for storing and retrieving persistent collection data (e.g., SESSION, IP, GLOBAL)
+	persistenceEngine ptypes.PersistentEngine
 }
 
 // Options is used to pass options to the WAF instance
 type Options struct {
 	ID      string
 	Context context.Context
+}
+
+func (w *WAF) ClosePersistentEngine() error {
+	return w.persistenceEngine.Close()
 }
 
 // NewTransaction Creates a new initialized transaction for this WAF instance
@@ -221,7 +229,7 @@ func (w *WAF) newTransaction(opts Options) *Transaction {
 			Limit:       w.ResponseBodyLimit,
 		})
 
-		tx.variables = *NewTransactionVariables()
+		tx.variables = *NewTransactionVariables(tx.WAF.persistenceEngine)
 		tx.transformationCache = map[transformationKey]*transformationValue{}
 	}
 
@@ -420,4 +428,10 @@ func (w *WAF) Validate() error {
 	}
 
 	return nil
+}
+
+// SetPersistenceEngine sets the agent used for storing and retrieving
+// persistent collection data (e.g., SESSION, IP, GLOBAL)
+func (w *WAF) SetPersistenceEngine(engine ptypes.PersistentEngine) {
+	w.persistenceEngine = engine
 }

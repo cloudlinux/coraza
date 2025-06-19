@@ -4,6 +4,7 @@
 package bodyprocessors_test
 
 import (
+	"github.com/corazawaf/coraza/v3/internal/persistence"
 	"strconv"
 	"strings"
 	"testing"
@@ -18,7 +19,7 @@ func TestURLEncode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v := corazawaf.NewTransactionVariables()
+	v := corazawaf.NewTransactionVariables(persistence.NoopEngine{})
 	m := map[string]string{
 		"a": "1",
 		"b": "2",
