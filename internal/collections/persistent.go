@@ -61,6 +61,11 @@ func (c *Persistent) FindRegex(key *regexp.Regexp) []types.MatchData {
 
 func (c *Persistent) FindString(key string) []types.MatchData {
 	res, _ := c.engine.Get(c.variable.Name(), c.collectionKey, key)
+
+	if res == "" {
+		return nil
+	}
+
 	return []types.MatchData{&corazarules.MatchData{
 		Variable_: c.variable,
 		Key_:      key,
