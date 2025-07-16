@@ -55,6 +55,7 @@ func (p *Parser) FromFile(profilePath string) error {
 	}
 
 	for _, profilePath := range files {
+		p.options.WAF.Logger.Debug().Str("file", profilePath).Msg("Parsing File")
 		profilePath = strings.TrimSpace(profilePath)
 		if !strings.HasPrefix(profilePath, "/") {
 			profilePath = filepath.Join(p.currentDir, profilePath)
