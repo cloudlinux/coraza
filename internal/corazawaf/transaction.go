@@ -131,6 +131,14 @@ type Transaction struct {
 	ruleFilter rftypes.RuleFilter
 }
 
+func (tx *Transaction) SetScriptFilename(value string) {
+	tx.variables.scriptFilename.Set(value)
+}
+
+func (tx *Transaction) SetScriptUsername(value string) {
+	tx.variables.scriptUsername.Set(value)
+}
+
 func (tx *Transaction) ID() string {
 	return tx.id
 }
@@ -306,6 +314,10 @@ func (tx *Transaction) Collection(idx variables.RuleVariable) collection.Collect
 		return tx.variables.timeWday
 	case variables.TimeYear:
 		return tx.variables.timeYear
+	case variables.ScriptFilename:
+		return tx.variables.scriptFilename
+	case variables.ScriptUsername:
+		return tx.variables.scriptUsername
 	case variables.User:
 		return tx.variables.user
 	case variables.Session:
@@ -1784,6 +1796,8 @@ type TransactionVariables struct {
 	timeSec                  *collections.Single
 	timeWday                 *collections.Single
 	timeYear                 *collections.Single
+	scriptFilename           *collections.Single
+	scriptUsername           *collections.Single
 	// persistent collections
 	global   *collections.Persistent
 	resource *collections.Persistent
@@ -1871,6 +1885,8 @@ func NewTransactionVariables(persistenceEngine ptypes.PersistentEngine) *Transac
 	v.timeSec = collections.NewSingle(variables.TimeSec)
 	v.timeWday = collections.NewSingle(variables.TimeWday)
 	v.timeYear = collections.NewSingle(variables.TimeYear)
+	v.scriptFilename = collections.NewSingle(variables.ScriptFilename)
+	v.scriptUsername = collections.NewSingle(variables.ScriptUsername)
 
 	// XML is a pointer to RequestXML
 	v.xml = v.requestXML
@@ -2215,6 +2231,14 @@ func (v *TransactionVariables) MultipartStrictError() collection.Single {
 	return v.multipartStrictError
 }
 
+func (v *TransactionVariables) ScriptFilename() collection.Single {
+	return v.scriptFilename
+}
+
+func (v *TransactionVariables) ScriptUsername() collection.Single {
+	return v.scriptUsername
+}
+
 func (v *TransactionVariables) Global() collection.Persistent {
 	return v.global
 }
@@ -2481,6 +2505,12 @@ func (v *TransactionVariables) All(f func(v variables.RuleVariable, col collecti
 		return
 	}
 	if !f(variables.TimeYear, v.timeYear) {
+		return
+	}
+	if !f(variables.ScriptFilename, v.scriptFilename) {
+		return
+	}
+	if !f(variables.ScriptUsername, v.scriptUsername) {
 		return
 	}
 }

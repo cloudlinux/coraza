@@ -262,4 +262,9 @@ const (
 	TimeWday
 	// TimeYear the current four-digit year value
 	TimeYear
+	// ScriptFilename Holds the full internal path to the script
+	// that will be used to serve the request
+	ScriptFilename
+	// ScriptUsername Holds the username of the owner of the script
+	ScriptUsername
 )
