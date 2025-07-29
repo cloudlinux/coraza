@@ -232,6 +232,10 @@ func (v RuleVariable) Name() string {
 		return "TIME_WDAY"
 	case TimeYear:
 		return "TIME_YEAR"
+	case ScriptFilename:
+		return "SCRIPT_FILENAME"
+	case ScriptUsername:
+		return "SCRIPT_USERNAME"
 
 	default:
 		return "INVALID_VARIABLE"
@@ -348,6 +352,8 @@ var rulemapRev = map[string]RuleVariable{
 	"TIME_SEC":                         TimeSec,
 	"TIME_WDAY":                        TimeWday,
 	"TIME_YEAR":                        TimeYear,
+	"SCRIPT_FILENAME":                  ScriptFilename,
+	"SCRIPT_USERNAME":                  ScriptUsername,
 }
 
 var errUnknownVariable = errors.New("unknown variable")

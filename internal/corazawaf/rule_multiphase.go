@@ -224,6 +224,10 @@ func minPhase(v variables.RuleVariable) types.RulePhase {
 		return types.PhaseRequestBody
 	case variables.MultipartPartHeaders:
 		return types.PhaseRequestBody
+	case variables.ScriptFilename:
+		return types.PhaseRequestBody
+	case variables.ScriptUsername:
+		return types.PhaseRequestBody
 	}
 
 	return types.PhaseUnknown
