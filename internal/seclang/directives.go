@@ -34,7 +34,8 @@ type DirectiveOptions struct {
 
 	// Parser is configuration of the parser, populated by multiple directives and consumed by
 	// directives that parse.
-	Parser ParserConfig
+	Parser         ParserConfig
+	LastParsedRule *corazawaf.Rule
 }
 
 type directive = func(options *DirectiveOptions) error
@@ -147,12 +148,10 @@ func directiveSecAction(options *DirectiveOptions) error {
 	if err != nil {
 		return err
 	}
-	if err := options.WAF.Rules.Add(rule); err != nil {
-		return err
-	}
+	options.LastParsedRule = rule
 	options.WAF.Logger.Debug().
 		Str("actions", options.Opts).
-		Msg("Added SecAction")
+		Msg("Added temporary SecAction")
 	return nil
 }
 
@@ -176,7 +175,6 @@ func directiveSecRule(options *DirectiveOptions) error {
 		return errEmptyOptions
 	}
 
-	ignoreErrors := options.Parser.IgnoreRuleCompilationErrors
 	rule, err := ParseRule(RuleOptions{
 		WithOperator: true,
 		WAF:          options.WAF,
@@ -186,25 +184,11 @@ func directiveSecRule(options *DirectiveOptions) error {
 		Data:         options.Opts,
 		Datasets:     options.Datasets,
 	})
-	if err != nil && !ignoreErrors {
+	if err != nil {
 		return err
-	} else if err != nil && ignoreErrors {
-		options.WAF.Logger.Debug().
-			Str("rule_id", options.Opts).
-			Err(err).
-			Msg("Ignoring rule compilation error")
-		return nil
 	}
-	err = options.WAF.Rules.Add(rule)
-	if err != nil && !ignoreErrors {
-		return err
-	} else if err != nil && ignoreErrors {
-		options.WAF.Logger.Debug().
-			Str("rule_id", options.Opts).
-			Err(err).
-			Msg("Ignoring rule compilation error")
-		return nil
-	}
+
+	options.LastParsedRule = rule
 	return nil
 }
 

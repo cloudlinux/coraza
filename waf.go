@@ -52,6 +52,10 @@ func NewWAF(config WAFConfig) (WAF, error) {
 		parser.SetRoot(c.fsRoot)
 	}
 
+	if c.strictParsing {
+		parser.SetStrict()
+	}
+
 	for _, r := range c.rules {
 		switch {
 		case r.rule != nil:

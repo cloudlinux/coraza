@@ -64,6 +64,8 @@ type WAFConfig interface {
 
 	// WithRootFS configures the root file system.
 	WithRootFS(fs fs.FS) WAFConfig
+
+	WithStrictParsing() WAFConfig
 }
 
 // NewWAFConfig creates a new WAFConfig with the default settings.
@@ -107,6 +109,13 @@ type wafConfig struct {
 	errorCallback             func(rule types.MatchedRule)
 	fsRoot                    fs.FS
 	persistenceEngineProvider ptypes.PersistenceEngineProvider
+	strictParsing			  bool
+}
+
+func (c *wafConfig) WithStrictParsing() WAFConfig {
+	ret := c.clone()
+	ret.strictParsing = true
+	return ret
 }
 
 func (c *wafConfig) WithRules(rules ...*corazawaf.Rule) WAFConfig {

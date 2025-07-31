@@ -28,6 +28,8 @@ type Parser struct {
 	currentDir   string
 	root         fs.FS
 	includeCount int
+	stagingChain []*corazawaf.Rule
+	isStrict     bool
 }
 
 // FromFile imports directives from a file
@@ -141,6 +143,12 @@ func (p *Parser) parseString(data string) error {
 			linebuffer.Reset()
 		}
 	}
+
+	// Final commit if file ended with rule or action it would not get committed
+	if err := p.commitStagedChain(); err != nil {
+		return err
+	}
+
 	if inBackticks {
 		return errors.New("backticks left open")
 	}
@@ -174,6 +182,7 @@ func (p *Parser) evaluateLine(l string) error {
 	}
 
 	d, ok := directivesMap[directive]
+	p.options.LastParsedRule = nil
 	if !ok || d == nil {
 		return p.logAndReturnErr(fmt.Sprintf("unknown directive %q", directive))
 	}
@@ -193,9 +202,70 @@ func (p *Parser) evaluateLine(l string) error {
 	}
 
 	if err := d(p.options); err != nil {
+		if !p.isStrict || (directive == "secrule" && p.options.Parser.IgnoreRuleCompilationErrors) {
+			p.options.WAF.Logger.Warn().
+				Int("line", p.currentLine).
+				Str("file", p.currentFile).
+				Str("directive", l).
+				Msg("Skipping invalid directive")
+
+			// If a rule compilation fails, the entire pending chain is invalid.
+			if directive == "secrule" || directive == "secaction" {
+				p.stagingChain = make([]*corazawaf.Rule, 0)
+			}
+			return nil
+		}
 		return fmt.Errorf("failed to compile the directive %q: %w", directive, err)
 	}
+	rule := p.options.LastParsedRule
+	if rule == nil {
+		// No rule was parsed, so commit any pending chain and continue.
+		return p.commitStagedChain()
+	}
 
+	// If we get here, we have a valid rule.
+	if rule.HasChain {
+		// If the rule is part of a chain, just add it to the stage and wait.
+		p.stagingChain = append(p.stagingChain, rule)
+	} else {
+		// If it's a standalone rule, it ends any previous chain.
+		// 1. Commit the chain that was pending before this rule.
+		if err := p.commitStagedChain(); err != nil {
+			return err
+		}
+
+		// 2. Stage and immediately commit this new standalone rule.
+		p.stagingChain = append(p.stagingChain, rule)
+		if err := p.commitStagedChain(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (p *Parser) commitStagedChain() error {
+	if len(p.stagingChain) == 0 {
+		return nil
+	}
+	p.options.WAF.Logger.Debug().
+		Int("count", len(p.stagingChain)).
+		Int("id", p.stagingChain[0].ID()).
+		Msg("Committing rule chain")
+
+	for _, rule := range p.stagingChain {
+		err := p.options.WAF.Rules.Add(rule)
+		if err != nil {
+			if !p.options.Parser.IgnoreRuleCompilationErrors && p.isStrict {
+				p.options.WAF.Logger.Error().Err(err).Int("rule_id", rule.ID()).Msg("Failed to add staged rule.")
+				return err
+			}
+			p.options.WAF.Logger.Error().Err(err).Int("rule_id", rule.ID()).Msg("Skipping entire staged rules because it failed to be added.")
+			break
+		}
+	}
+
+	p.stagingChain = make([]*corazawaf.Rule, 0)
 	return nil
 }
 
@@ -214,6 +284,10 @@ func (p *Parser) SetRoot(root fs.FS) {
 	p.root = root
 }
 
+func (p *Parser) SetStrict() {
+	p.isStrict = true
+}
+
 // NewParser creates a new parser from a WAF instance
 // Rules and settings will be inserted into the WAF
 // rule container (RuleGroup).
@@ -223,7 +297,9 @@ func NewParser(waf *corazawaf.WAF) *Parser {
 			WAF:      waf,
 			Datasets: make(map[string][]string),
 		},
-		root: io.OSFS{},
+		root:         io.OSFS{},
+		stagingChain: make([]*corazawaf.Rule, 0),
+		isStrict:     false,
 	}
 	return p
 }
