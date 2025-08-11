@@ -3,7 +3,11 @@
 
 package actions
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/corazawaf/coraza/v3/internal/corazawaf"
+)
 
 func TestRedirectInit(t *testing.T) {
 	t.Run("no arguments", func(t *testing.T) {
@@ -19,7 +23,26 @@ func TestRedirectInit(t *testing.T) {
 			t.Error("unexpected error")
 		}
 
-		if want, have := "abc", a.(*redirectFn).target; want != have {
+		waf := corazawaf.NewWAF()
+		tx := waf.NewTransaction()
+
+		if want, have := "abc", a.(*redirectFn).target.Expand(tx); want != have {
+			t.Errorf("unexpected target, want %q, got %q", want, have)
+		}
+	})
+
+	t.Run("passed expendable arguments", func(t *testing.T) {
+
+		waf := corazawaf.NewWAF()
+		tx := waf.NewTransaction()
+		tx.Variables().Env().Set("abc", []string{"xyz"})
+
+		a := redirect()
+		if err := a.Init(nil, "%{ENV.abc}"); err != nil {
+			t.Fatalf("init failed: %v", err)
+		}
+
+		if want, have := "xyz", a.(*redirectFn).target.Expand(tx); want != have {
 			t.Errorf("unexpected target, want %q, got %q", want, have)
 		}
 	})
