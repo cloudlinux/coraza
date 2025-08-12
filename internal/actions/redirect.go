@@ -4,6 +4,7 @@
 package actions
 
 import (
+	"github.com/corazawaf/coraza/v3/experimental/plugins/macro"
 	"github.com/corazawaf/coraza/v3/experimental/plugins/plugintypes"
 	"github.com/corazawaf/coraza/v3/types"
 )
@@ -21,7 +22,7 @@ import (
 // SecRule REQUEST_HEADERS:User-Agent "@streq Test" "phase:1,id:130,log,redirect:http://www.example.com/failed.html"
 // ```
 type redirectFn struct {
-	target string
+	target macro.Macro
 }
 
 func (a *redirectFn) Init(_ plugintypes.RuleMetadata, data string) error {
@@ -29,7 +30,12 @@ func (a *redirectFn) Init(_ plugintypes.RuleMetadata, data string) error {
 		return ErrMissingArguments
 	}
 
-	a.target = data
+	m, err := macro.NewMacro(data)
+	if err != nil {
+		return err
+	}
+	a.target = m
+
 	return nil
 }
 
@@ -47,7 +53,7 @@ func (a *redirectFn) Evaluate(r plugintypes.RuleMetadata, tx plugintypes.Transac
 		Status: status,
 		RuleID: rid,
 		Action: "redirect",
-		Data:   a.target,
+		Data:   a.target.Expand(tx),
 	})
 }
 
