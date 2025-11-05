@@ -50,7 +50,7 @@ func (o *rbl) Evaluate(tx plugintypes.TransactionState, ipAddr string) bool {
 		defer func() {
 			close(resC)
 		}()
-		res, err := o.resolver.LookupHost(ctx, addr)
+		res, err := o.resolver.LookupIP(ctx, "ip4", addr)
 
 		if err != nil {
 			resC <- false
