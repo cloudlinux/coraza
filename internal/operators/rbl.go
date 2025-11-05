@@ -50,25 +50,11 @@ func (o *rbl) Evaluate(tx plugintypes.TransactionState, ipAddr string) bool {
 		defer func() {
 			close(resC)
 		}()
-		res, err := o.resolver.LookupIP(ctx, "ip4", addr)
+		_, err := o.resolver.LookupIP(ctx, "ip4", addr)
 
 		if err != nil {
 			resC <- false
 			return
-		}
-		// var status string
-		if len(res) > 0 {
-			txt, err := o.resolver.LookupTXT(ctx, addr)
-			if err != nil {
-				resC <- false
-				return
-			}
-
-			if len(txt) > 0 {
-				status := txt[0]
-				captures = append(captures, status)
-				tx.Variables().TX().Set("httpbl_msg", []string{status})
-			}
 		}
 
 		resC <- true
