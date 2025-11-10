@@ -198,6 +198,14 @@ func (v RuleVariable) Name() string {
 		return "USERID"
 	case IP:
 		return "IP"
+	case Global:
+		return "GLOBAL"
+	case Resource:
+		return "RESOURCE"
+	case User:
+		return "USER"
+	case Session:
+		return "SESSION"
 	case ResBodyError:
 		return "RES_BODY_ERROR"
 	case ResBodyErrorMsg:
@@ -224,6 +232,10 @@ func (v RuleVariable) Name() string {
 		return "TIME_WDAY"
 	case TimeYear:
 		return "TIME_YEAR"
+	case ScriptFilename:
+		return "SCRIPT_FILENAME"
+	case ScriptUsername:
+		return "SCRIPT_USERNAME"
 
 	default:
 		return "INVALID_VARIABLE"
@@ -323,6 +335,10 @@ var rulemapRev = map[string]RuleVariable{
 	"SESSIONID":                        Sessionid,
 	"USERID":                           Userid,
 	"IP":                               IP,
+	"GLOBAL":                           Global,
+	"RESOURCE":                         Resource,
+	"USER":                             User,
+	"SESSION":                          Session,
 	"RES_BODY_ERROR":                   ResBodyError,
 	"RES_BODY_ERROR_MSG":               ResBodyErrorMsg,
 	"RES_BODY_PROCESSOR_ERROR":         ResBodyProcessorError,
@@ -336,6 +352,8 @@ var rulemapRev = map[string]RuleVariable{
 	"TIME_SEC":                         TimeSec,
 	"TIME_WDAY":                        TimeWday,
 	"TIME_YEAR":                        TimeYear,
+	"SCRIPT_FILENAME":                  ScriptFilename,
+	"SCRIPT_USERNAME":                  ScriptUsername,
 }
 
 var errUnknownVariable = errors.New("unknown variable")

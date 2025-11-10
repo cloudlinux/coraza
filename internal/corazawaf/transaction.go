@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/corazawaf/coraza/v3/experimental/persistence/ptypes"
 	"io"
 	"math"
 	"mime"
@@ -21,6 +22,7 @@ import (
 	"github.com/corazawaf/coraza/v3/collection"
 	"github.com/corazawaf/coraza/v3/debuglog"
 	"github.com/corazawaf/coraza/v3/experimental/plugins/plugintypes"
+	"github.com/corazawaf/coraza/v3/experimental/rulefilter/rftypes"
 	"github.com/corazawaf/coraza/v3/internal/auditlog"
 	"github.com/corazawaf/coraza/v3/internal/bodyprocessors"
 	"github.com/corazawaf/coraza/v3/internal/collections"
@@ -123,6 +125,18 @@ type Transaction struct {
 	variables TransactionVariables
 
 	transformationCache map[transformationKey]*transformationValue
+
+	// ruleFilter allows applying custom rule filtering logic per transaction.
+	// If set, it's used during rule evaluation to determine if a rule should be skipped.
+	ruleFilter rftypes.RuleFilter
+}
+
+func (tx *Transaction) SetScriptFilename(value string) {
+	tx.variables.scriptFilename.Set(value)
+}
+
+func (tx *Transaction) SetScriptUsername(value string) {
+	tx.variables.scriptUsername.Set(value)
 }
 
 func (tx *Transaction) ID() string {
@@ -300,6 +314,20 @@ func (tx *Transaction) Collection(idx variables.RuleVariable) collection.Collect
 		return tx.variables.timeWday
 	case variables.TimeYear:
 		return tx.variables.timeYear
+	case variables.ScriptFilename:
+		return tx.variables.scriptFilename
+	case variables.ScriptUsername:
+		return tx.variables.scriptUsername
+	case variables.User:
+		return tx.variables.user
+	case variables.Session:
+		return tx.variables.session
+	case variables.Global:
+		return tx.variables.global
+	case variables.IP:
+		return tx.variables.ip
+	case variables.Resource:
+		return tx.variables.resource
 	}
 
 	return collections.Noop
@@ -509,9 +537,7 @@ func (tx *Transaction) MatchRule(r *Rule, mds []types.MatchData) {
 	// tx.MatchedRules = append(tx.MatchedRules, mr)
 
 	// If the rule is set to audit, we log the transaction to the audit log
-	if r.Audit {
-		tx.audit = true
-	}
+	tx.audit = r.Audit
 
 	// set highest_severity
 	hs := tx.variables.highestSeverity
@@ -527,6 +553,7 @@ func (tx *Transaction) MatchRule(r *Rule, mds []types.MatchData) {
 		ClientIPAddress_: tx.variables.remoteAddr.Get(),
 		Rule_:            &r.RuleMetadata,
 		Log_:             r.Log,
+		Audit_:           tx.audit,
 		MatchedDatas_:    mds,
 		Context_:         tx.context,
 	}
@@ -559,7 +586,6 @@ func (tx *Transaction) MatchRule(r *Rule, mds []types.MatchData) {
 	if tx.WAF.ErrorLogCb != nil && r.Log {
 		tx.WAF.ErrorLogCb(mr)
 	}
-
 }
 
 // GetStopWatch is used to debug phase durations
@@ -592,13 +618,15 @@ func (tx *Transaction) GetField(rv ruleVariableParams) []types.MatchData {
 		if m, ok := col.(collection.Keyed); ok {
 			matches = m.FindRegex(rv.KeyRx)
 		} else {
-			panic("attempted to use regex with non-selectable collection: " + rv.Variable.Name())
+			tx.DebugLogger().Error().Msg("attempted to use regex with non-selectable collection: " + rv.Variable.Name())
+			return matches
 		}
 	case rv.KeyStr != "":
 		if m, ok := col.(collection.Keyed); ok {
 			matches = m.FindString(rv.KeyStr)
 		} else {
-			panic("attempted to use string with non-selectable collection: " + rv.Variable.Name())
+			tx.DebugLogger().Error().Msg("attempted to use string with non-selectable collection: " + rv.Variable.Name())
+			return matches
 		}
 	default:
 		matches = col.FindAll()
@@ -1503,7 +1531,7 @@ func (tx *Transaction) AuditLog() *auditlog.Log {
 				// An assertion has to be done to check if the MatchedRule implements the Log() function before calling Log()
 				// It is performed to avoid breaking the Coraza v3.* API adding a Log() method to the MatchedRule interface
 				mrWithlog, ok := mr.(*corazarules.MatchedRule)
-				if ok && mrWithlog.Log() {
+				if ok && (mrWithlog.Log() || mrWithlog.Audit()) {
 					r := mr.Rule()
 					for _, matchData := range mr.MatchedDatas() {
 						newAlEntry := auditlog.Message{
@@ -1541,10 +1569,33 @@ func (tx *Transaction) AuditLog() *auditlog.Log {
 	if !auditLogPartRulesMatchedSet && auditLogPartAuditLogTrailerSet {
 		for _, mr := range tx.matchedRules {
 			mrWithlog, ok := mr.(*corazarules.MatchedRule)
-			if ok && mrWithlog.Log() {
-				al.Messages_ = append(al.Messages_, auditlog.Message{
-					ErrorMessage_: mr.ErrorLog(),
-				})
+			if ok && (mrWithlog.Log() || mrWithlog.Audit()) {
+				// In v3, every rule hit is serialized as a JSON object (with message + details) inside audit_data.messages.
+				// Part K does not exist in v3 - all matched rule metadata is provided through part H -> messages[].
+				// It seems the upstream has broken this compatibility, so we're re-adding it here.
+				// The implementation is intentionally kept simple to ease future upstream pulls if the issue gets fixed.
+				r := mr.Rule()
+				for _, matchData := range mr.MatchedDatas() {
+					al.Messages_ = append(al.Messages_, auditlog.Message{
+						Actionset_: strings.Join(tx.WAF.ComponentNames, " "),
+						Message_:   matchData.Message(),
+						Data_: &auditlog.MessageData{
+							File_:     mr.Rule().File(),
+							Line_:     mr.Rule().Line(),
+							ID_:       r.ID(),
+							Rev_:      r.Revision(),
+							Msg_:      matchData.Message(),
+							Data_:     matchData.Data(),
+							Severity_: r.Severity(),
+							Ver_:      r.Version(),
+							Maturity_: r.Maturity(),
+							Accuracy_: r.Accuracy(),
+							Tags_:     r.Tags(),
+							Raw_:      r.Raw(),
+						},
+						ErrorMessage_: mr.ErrorLog(),
+					})
+				}
 			}
 		}
 
@@ -1596,6 +1647,13 @@ func (tx *Transaction) Close() error {
 	}
 
 	return fmt.Errorf("transaction close failed: %v", errors.Join(errs...))
+}
+
+// SetRuleFilter applies a RuleFilter to the transaction.
+// This filter will be consulted during rule evaluation in each phase
+// to determine if specific rules should be skipped for this transaction.
+func (tx *Transaction) SetRuleFilter(filter rftypes.RuleFilter) {
+	tx.ruleFilter = filter
 }
 
 // String will return a string with the transaction debug information
@@ -1738,9 +1796,17 @@ type TransactionVariables struct {
 	timeSec                  *collections.Single
 	timeWday                 *collections.Single
 	timeYear                 *collections.Single
+	scriptFilename           *collections.Single
+	scriptUsername           *collections.Single
+	// persistent collections
+	global   *collections.Persistent
+	resource *collections.Persistent
+	ip       *collections.Persistent
+	session  *collections.Persistent
+	user     *collections.Persistent
 }
 
-func NewTransactionVariables() *TransactionVariables {
+func NewTransactionVariables(persistenceEngine ptypes.PersistentEngine) *TransactionVariables {
 	v := &TransactionVariables{}
 	v.urlencodedError = collections.NewSingle(variables.UrlencodedError)
 	v.responseContentType = collections.NewSingle(variables.ResponseContentType)
@@ -1819,6 +1885,8 @@ func NewTransactionVariables() *TransactionVariables {
 	v.timeSec = collections.NewSingle(variables.TimeSec)
 	v.timeWday = collections.NewSingle(variables.TimeWday)
 	v.timeYear = collections.NewSingle(variables.TimeYear)
+	v.scriptFilename = collections.NewSingle(variables.ScriptFilename)
+	v.scriptUsername = collections.NewSingle(variables.ScriptUsername)
 
 	// XML is a pointer to RequestXML
 	v.xml = v.requestXML
@@ -1849,6 +1917,13 @@ func NewTransactionVariables() *TransactionVariables {
 		// Only used in a concatenating collection so variable name doesn't matter.
 		v.argsPath.Names(variables.Unknown),
 	)
+
+	// Persistent collections
+	v.global = collections.NewPersistent(variables.Global, persistenceEngine)
+	v.resource = collections.NewPersistent(variables.Resource, persistenceEngine)
+	v.ip = collections.NewPersistent(variables.IP, persistenceEngine)
+	v.session = collections.NewPersistent(variables.Session, persistenceEngine)
+	v.user = collections.NewPersistent(variables.User, persistenceEngine)
 	return v
 }
 
@@ -2156,6 +2231,34 @@ func (v *TransactionVariables) MultipartStrictError() collection.Single {
 	return v.multipartStrictError
 }
 
+func (v *TransactionVariables) ScriptFilename() collection.Single {
+	return v.scriptFilename
+}
+
+func (v *TransactionVariables) ScriptUsername() collection.Single {
+	return v.scriptUsername
+}
+
+func (v *TransactionVariables) Global() collection.Persistent {
+	return v.global
+}
+
+func (v *TransactionVariables) Resource() collection.Persistent {
+	return v.resource
+}
+
+func (v *TransactionVariables) IP() collection.Persistent {
+	return v.ip
+}
+
+func (v *TransactionVariables) Session() collection.Persistent {
+	return v.session
+}
+
+func (v *TransactionVariables) User() collection.Persistent {
+	return v.user
+}
+
 // All iterates over the variables. We return both variable and its collection, i.e. key/value, to follow
 // general range iteration in Go which always has a key and value (key is int index for slices). Notably,
 // this is consistent with discussions for custom iterable types in a future language version
@@ -2402,6 +2505,12 @@ func (v *TransactionVariables) All(f func(v variables.RuleVariable, col collecti
 		return
 	}
 	if !f(variables.TimeYear, v.timeYear) {
+		return
+	}
+	if !f(variables.ScriptFilename, v.scriptFilename) {
+		return
+	}
+	if !f(variables.ScriptUsername, v.scriptUsername) {
 		return
 	}
 }

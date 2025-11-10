@@ -196,6 +196,9 @@ type Transaction interface {
 	// ID returns the transaction ID.
 	ID() string
 
+	SetScriptFilename(string)
+	SetScriptUsername(string)
+
 	// Closer closes the transaction and releases any resources associated with it such as request/response bodies.
 	io.Closer
 }

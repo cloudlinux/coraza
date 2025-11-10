@@ -228,6 +228,14 @@ const (
 	Userid
 	// IP is kept for compatibility
 	IP
+	// Global is a persistent collection of global variables
+	Global
+	// Resource is a persistent collection of resources
+	Resource
+	// User is a persistent collection of user variables
+	User
+	// Session is a persistent collection of session variables
+	Session
 	// ResBodyError
 	ResBodyError
 	// ResBodyErrorMsg
@@ -254,4 +262,9 @@ const (
 	TimeWday
 	// TimeYear the current four-digit year value
 	TimeYear
+	// ScriptFilename Holds the full internal path to the script
+	// that will be used to serve the request
+	ScriptFilename
+	// ScriptUsername Holds the username of the owner of the script
+	ScriptUsername
 )
