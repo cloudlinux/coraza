@@ -1642,6 +1642,8 @@ func (tx *Transaction) Close() error {
 			Msg("Transaction finished")
 	}
 
+	tx.transformationCache = map[transformationKey]*transformationValue{}
+
 	if len(errs) == 0 {
 		return nil
 	}
