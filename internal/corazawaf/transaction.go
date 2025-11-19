@@ -1642,6 +1642,9 @@ func (tx *Transaction) Close() error {
 			Msg("Transaction finished")
 	}
 
+	tx.transformationCache = map[transformationKey]*transformationValue{}
+	tx.variables = *NewTransactionVariables(tx.WAF.persistenceEngine)
+
 	if len(errs) == 0 {
 		return nil
 	}
