@@ -24,11 +24,8 @@ func TestTransactionPoolCacheIsolation(t *testing.T) {
 		t.Fatalf("Failed to close tx1: %s", err.Error())
 	}
 
-	// Create the second transaction and save its pointer to transformationCache
-	// Create two transactions
 	tx2 := waf.NewTransaction()
 	assert.Empty(t, tx2.transformationCache)
-	// put some value in the transformation cache for tx1
 
 	t.Logf("tx2.transformationCache pointer is %p", tx2.transformationCache)
 	if err := tx2.Close(); err != nil {
@@ -36,7 +33,6 @@ func TestTransactionPoolCacheIsolation(t *testing.T) {
 	}
 
 	tx3, tx4 := waf.NewTransaction(), waf.NewTransaction()
-	//tx1.variables
 
 	t.Logf("\ntx1.transformationCache pointer is %p\n"+
 		"tx2.tranformactionCache pointer is %p\n"+
