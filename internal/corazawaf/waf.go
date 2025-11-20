@@ -177,6 +177,8 @@ func (w *WAF) NewTransactionWithOptions(opts Options) *Transaction {
 // Using the specified ID
 func (w *WAF) newTransaction(opts Options) *Transaction {
 	tx := w.txPool.Get().(*Transaction)
+
+	w.Logger.Info().Msg(fmt.Sprintf("getting transaction from the pool, pointer %p", tx))
 	tx.id = opts.ID
 	tx.context = opts.Context
 	tx.matchedRules = []types.MatchedRule{}
@@ -253,7 +255,7 @@ func (w *WAF) newTransaction(opts Options) *Transaction {
 	tx.variables.uniqueID.Set(tx.id)
 	tx.setTimeVariables()
 
-	tx.debugLogger.Debug().Msg("Transaction started")
+	tx.debugLogger.Debug().Msg(fmt.Sprintf("transaction created, pointer %p", tx))
 
 	return tx
 }

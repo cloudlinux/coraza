@@ -1610,6 +1610,7 @@ func (tx *Transaction) AuditLog() *auditlog.Log {
 func (tx *Transaction) Close() error {
 	defer tx.WAF.txPool.Put(tx)
 
+	tx.debugLogger.Info().Msg(fmt.Sprintf("closing transaction, pointer %p", tx))
 	var errs []error
 	if environment.HasAccessToFS {
 		// TODO(jcchavezs): filesTmpNames should probably be a new kind of collection that
