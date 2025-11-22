@@ -62,6 +62,8 @@ func (c *NamedCollection) Len() int {
 // Data is an internal method used for serializing to JSON
 func (c *NamedCollection) Data() map[string][]string {
 	result := make(map[string][]string, len(c.data))
+	c.mx.RLock()
+	defer c.mx.RUnlock()
 	for k, v := range c.data {
 		result[k] = make([]string, len(v))
 		for i, a := range v {
@@ -110,6 +112,8 @@ func (c *NamedCollectionNames) FindString(key string) []types.MatchData {
 
 func (c *NamedCollectionNames) FindAll() []types.MatchData {
 	var res []types.MatchData
+	c.collection.mx.RLock()
+	defer c.collection.mx.RUnlock()
 	// Iterates over all the data in the map and adds the key element also to the Key field (The key value may be the value
 	//  that is matched, but it is still also the key of the pair and it is needed to print the matched var name)
 	for _, data := range c.collection.Map.data {

@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/corazawaf/coraza/v3/experimental/persistence/ptypes"
 	"io"
 	"math"
 	"mime"
@@ -17,7 +16,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/corazawaf/coraza/v3/experimental/persistence/ptypes"
 
 	"github.com/corazawaf/coraza/v3/collection"
 	"github.com/corazawaf/coraza/v3/debuglog"
@@ -129,6 +131,7 @@ type Transaction struct {
 	// ruleFilter allows applying custom rule filtering logic per transaction.
 	// If set, it's used during rule evaluation to determine if a rule should be skipped.
 	ruleFilter rftypes.RuleFilter
+	mx         sync.Mutex
 }
 
 func (tx *Transaction) SetScriptFilename(value string) {
@@ -593,6 +596,8 @@ func (tx *Transaction) MatchRule(r *Rule, mds []types.MatchData) {
 func (tx *Transaction) GetStopWatch() string {
 	ts := tx.Timestamp
 	sum := int64(0)
+	tx.mx.Lock()
+	defer tx.mx.Unlock()
 	for _, r := range tx.stopWatches {
 		sum += r
 	}
