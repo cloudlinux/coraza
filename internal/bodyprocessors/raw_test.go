@@ -4,7 +4,6 @@
 package bodyprocessors_test
 
 import (
-	"github.com/corazawaf/coraza/v3/internal/persistence"
 	"strconv"
 	"strings"
 	"testing"
@@ -12,6 +11,7 @@ import (
 	"github.com/corazawaf/coraza/v3/experimental/plugins/plugintypes"
 	"github.com/corazawaf/coraza/v3/internal/bodyprocessors"
 	"github.com/corazawaf/coraza/v3/internal/corazawaf"
+	"github.com/corazawaf/coraza/v3/internal/persistence"
 )
 
 func TestRAW(t *testing.T) {

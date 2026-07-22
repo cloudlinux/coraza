@@ -1,7 +1,11 @@
+// Copyright 2025 CloudLinux
+// SPDX-License-Identifier: Apache-2.0
+
 package persistence
 
 import (
 	"fmt"
+
 	"github.com/corazawaf/coraza/v3"
 	"github.com/corazawaf/coraza/v3/experimental/persistence/ptypes"
 )

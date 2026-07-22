@@ -6,12 +6,12 @@ package coraza
 import (
 	"context"
 	"fmt"
-	"github.com/corazawaf/coraza/v3/experimental/persistence/ptypes"
-	"github.com/corazawaf/coraza/v3/internal/persistence"
 	"strings"
 
+	"github.com/corazawaf/coraza/v3/experimental/persistence/ptypes"
 	"github.com/corazawaf/coraza/v3/internal/corazawaf"
 	"github.com/corazawaf/coraza/v3/internal/environment"
+	"github.com/corazawaf/coraza/v3/internal/persistence"
 	"github.com/corazawaf/coraza/v3/internal/seclang"
 	"github.com/corazawaf/coraza/v3/types"
 )

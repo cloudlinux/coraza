@@ -19,10 +19,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/corazawaf/coraza/v3/experimental/persistence/ptypes"
-
 	"github.com/corazawaf/coraza/v3/collection"
 	"github.com/corazawaf/coraza/v3/debuglog"
+	"github.com/corazawaf/coraza/v3/experimental/persistence/ptypes"
 	"github.com/corazawaf/coraza/v3/experimental/plugins/plugintypes"
 	"github.com/corazawaf/coraza/v3/experimental/rulefilter/rftypes"
 	"github.com/corazawaf/coraza/v3/internal/auditlog"

@@ -4,10 +4,10 @@
 package coraza
 
 import (
-	"github.com/corazawaf/coraza/v3/experimental/persistence/ptypes"
 	"io/fs"
 
 	"github.com/corazawaf/coraza/v3/debuglog"
+	"github.com/corazawaf/coraza/v3/experimental/persistence/ptypes"
 	"github.com/corazawaf/coraza/v3/experimental/plugins/plugintypes"
 	"github.com/corazawaf/coraza/v3/internal/corazawaf"
 	"github.com/corazawaf/coraza/v3/types"

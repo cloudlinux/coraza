@@ -2,20 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //go:build !tinygo
-// +build !tinygo
 
 package actions_test
 
 import (
 	"fmt"
-	"github.com/corazawaf/coraza/v3/experimental/persistence"
-	"github.com/corazawaf/coraza/v3/experimental/persistence/ptypes"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/corazawaf/coraza/v3"
+	"github.com/corazawaf/coraza/v3/experimental/persistence"
+	"github.com/corazawaf/coraza/v3/experimental/persistence/ptypes"
 	"github.com/corazawaf/coraza/v3/experimental/plugins/plugintypes"
 	"github.com/corazawaf/coraza/v3/internal/actions"
 	"github.com/corazawaf/coraza/v3/types/variables"

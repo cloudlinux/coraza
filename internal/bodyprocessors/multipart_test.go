@@ -4,13 +4,13 @@
 package bodyprocessors_test
 
 import (
-	"github.com/corazawaf/coraza/v3/internal/persistence"
 	"strings"
 	"testing"
 
 	"github.com/corazawaf/coraza/v3/experimental/plugins/plugintypes"
 	"github.com/corazawaf/coraza/v3/internal/bodyprocessors"
 	"github.com/corazawaf/coraza/v3/internal/corazawaf"
+	"github.com/corazawaf/coraza/v3/internal/persistence"
 )
 
 func multipartProcessor(t *testing.T) plugintypes.BodyProcessor {
