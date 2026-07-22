@@ -96,10 +96,16 @@ func (br *BodyBuffer) Write(data []byte) (n int, err error) {
 
 type bodyBufferReader struct {
 	pos int
+	// err, when set, is returned by every Read; used to surface
+	// types.ErrBodyTruncated on readers invalidated by Truncate.
+	err error
 	br  *BodyBuffer
 }
 
 func (b *bodyBufferReader) Read(p []byte) (n int, err error) {
+	if b.err != nil {
+		return 0, b.err
+	}
 	if b.br == nil {
 		// reader has been closed and hence we don't attempt to do anymore read
 		return 0, io.EOF
@@ -144,6 +150,61 @@ func (br *BodyBuffer) Reader() (io.Reader, error) {
 // Size returns the current size of the body buffer
 func (br *BodyBuffer) Size() int64 {
 	return br.length
+}
+
+// Truncate discards all buffered content beyond limit bytes, releasing the
+// backing memory. The in-memory buffer is replaced with a fresh one holding
+// only the prefix (bytes.Buffer.Truncate retains the full backing array,
+// which transaction pooling would keep alive past Close); the file-backed
+// buffer is truncated in place, or closed and removed when limit is 0.
+// A limit at or above the current size is a no-op.
+func (br *BodyBuffer) Truncate(limit int64) error {
+	if limit >= br.length {
+		return nil
+	}
+
+	if environment.HasAccessToFS && br.writer != nil {
+		if limit == 0 {
+			w := br.writer
+			br.writer = nil
+			br.length = 0
+			br.invalidateReaders()
+			err := w.Close()
+			// remove even when Close fails: br.writer is already nil, so
+			// this is the last reference to the file and Reset() would no
+			// longer clean it up.
+			if rmErr := os.Remove(w.Name()); err == nil {
+				err = rmErr
+			}
+			return err
+		}
+		if err := br.writer.Truncate(limit); err != nil {
+			// nothing changed: length and readers stay valid
+			return err
+		}
+		br.length = limit
+		br.invalidateReaders()
+		return nil
+	}
+	fresh := &bytes.Buffer{}
+	fresh.Write(br.buffer.Bytes()[:limit])
+	br.buffer = fresh
+	br.length = limit
+	br.invalidateReaders()
+	return nil
+}
+
+// invalidateReaders marks all outstanding readers with ErrBodyTruncated:
+// reading with a position beyond a shrunk buffer would panic, and quietly
+// serving the prefix or EOF would hide the contract violation of holding a
+// reader across truncation. New readers (e.g. audit log part C) see the
+// kept prefix.
+func (br *BodyBuffer) invalidateReaders() {
+	for _, r := range br.readers {
+		r.br = nil
+		r.err = types.ErrBodyTruncated
+	}
+	br.readers = nil
 }
 
 // Reset will reset buffers and delete temporary files

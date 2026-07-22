@@ -4,10 +4,18 @@
 package types
 
 import (
+	"errors"
 	"io"
 
 	"github.com/corazawaf/coraza/v3/debuglog"
 )
+
+// ErrBodyTruncated is returned by request body readers obtained before a
+// TruncateRequestBody call: truncation invalidates them, and reading
+// truncated data as if it were the full body would be silent data loss.
+// Holding a reader across truncation means the caller's flow violates the
+// TruncateRequestBody contract.
+var ErrBodyTruncated = errors.New("request body released by TruncateRequestBody")
 
 // Transaction is created from a WAF instance to handle web requests and responses,
 // it contains a copy of most WAF configurations that can be safely changed.
@@ -198,6 +206,24 @@ type Transaction interface {
 
 	SetScriptFilename(string)
 	SetScriptUsername(string)
+
+	// TruncateRequestBody releases the buffered request body once
+	// request-phase analysis is done, keeping at most limit bytes as a
+	// preview for audit logging. limit=0 discards the body entirely.
+	// Intended for connectors that keep a transaction open between the
+	// request and logging phases (waiting for the upstream response): those
+	// phases never re-read the request body, so holding it only inflates
+	// memory for the lifetime of the parked transaction. Call after
+	// ProcessRequestBody(); calling earlier returns an error and leaves the
+	// body untouched, unless the rule engine is off or the transaction is
+	// already interrupted — states in which request-body analysis will
+	// never run and truncation is accepted at any point. Afterwards audit log part C emits at most limit bytes
+	// (a raw prefix — it may cut mid-token) and the REQUEST_BODY variable
+	// holds the same prefix, while REQUEST_BODY_LENGTH keeps the original
+	// received length and parsed derivatives (ARGS_POST, JSON/XML matches)
+	// remain intact. Readers previously obtained via RequestBodyReader are
+	// invalidated and fail with ErrBodyTruncated.
+	TruncateRequestBody(limit int64) error
 
 	// Closer closes the transaction and releases any resources associated with it such as request/response bodies.
 	io.Closer
