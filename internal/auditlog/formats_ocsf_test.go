@@ -1,6 +1,8 @@
 // Copyright 2024 Juan Pablo Tosso and the OWASP Coraza contributors
 // SPDX-License-Identifier: Apache-2.0
 
+//go:build !tinygo
+
 package auditlog
 
 import (
@@ -44,7 +46,7 @@ func TestOCSFFormatter(t *testing.T) {
 			t.Errorf("failed to match audit log Unix Timestamp, \ngot: %s\nexpected: %s", fmt.Sprint(wra.Time), fmt.Sprint(al.Transaction().UnixTimestamp()))
 		}
 
-		// validate transation interruption
+		// validate transaction interruption
 		if al.Transaction().IsInterrupted() {
 			if wra.Action != "Denied" {
 				t.Errorf("failed to match audit log Action, \ngot: %s\nexpected: %s", wra.Action, "Denied")
@@ -162,6 +164,132 @@ func TestOCSFFormatter(t *testing.T) {
 		// 	t.Errorf("failed to validate audit log schema, \ngot: %s\nexpected: %s", ocsfvalidate_1_2.Validate("web_resources_activity", data), "")
 		// }
 	}
+}
+
+func TestOCSFFormatterPartJ(t *testing.T) {
+	f := &ocsfFormatter{}
+
+	t.Run("uploaded files appear as observables", func(t *testing.T) {
+		al := &Log{
+			Parts_: []types.AuditLogPart{
+				types.AuditLogPartRequestHeaders,
+				types.AuditLogPartUploadedFiles,
+				types.AuditLogPartRulesMatched,
+			},
+			Transaction_: Transaction{
+				Timestamp_:     "02/Jan/2006:15:04:20 -0700",
+				UnixTimestamp_: 1136239460,
+				ID_:            "partj-test",
+				Request_: &TransactionRequest{
+					URI_:      "/upload",
+					Method_:   "POST",
+					Protocol_: "HTTP/1.1",
+					Files_: []plugintypes.AuditLogTransactionRequestFiles{
+						&TransactionRequestFiles{Name_: "report.csv", Size_: 5432, Mime_: "text/csv"},
+						&TransactionRequestFiles{Name_: "photo.jpg", Size_: 98765, Mime_: "image/jpeg"},
+					},
+				},
+			},
+			Messages_: []plugintypes.AuditLogMessage{
+				&Message{
+					Message_: "test",
+					Data_:    &MessageData{Msg_: "test", Raw_: `SecAction "id:200"`},
+				},
+			},
+		}
+
+		data, err := f.Format(al)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var wra application.WebResourcesActivity
+		if err := json.Unmarshal(data, &wra); err != nil {
+			t.Fatal(err)
+		}
+
+		// Verify each file produces 3 observables: File Name, Size, Mime
+		expectedFiles := map[string]struct {
+			size string
+			mime string
+		}{
+			"report.csv": {size: "5432", mime: "text/csv"},
+			"photo.jpg":  {size: "98765", mime: "image/jpeg"},
+		}
+
+		for name, expected := range expectedFiles {
+			// Count occurrences per observable type to detect both missing and duplicate entries
+			counts := map[string]int{"File Name": 0, "Size": 0, "Mime": 0}
+			for _, obs := range wra.Observables {
+				if obs.Name != name {
+					continue
+				}
+				switch obs.Type {
+				case "File Name":
+					counts["File Name"]++
+					if obs.Value != name {
+						t.Errorf("file %s: expected File Name observable value %s, got %s", name, name, obs.Value)
+					}
+				case "Size":
+					counts["Size"]++
+					if obs.Value != expected.size {
+						t.Errorf("file %s: expected Size observable value %s, got %s", name, expected.size, obs.Value)
+					}
+				case "Mime":
+					counts["Mime"]++
+					if obs.Value != expected.mime {
+						t.Errorf("file %s: expected Mime observable value %s, got %s", name, expected.mime, obs.Value)
+					}
+				}
+			}
+			for obsType, count := range counts {
+				if count != 1 {
+					t.Errorf("file %s: expected exactly 1 %s observable, got %d", name, obsType, count)
+				}
+			}
+		}
+	})
+
+	t.Run("no files produces no file observables", func(t *testing.T) {
+		al := &Log{
+			Parts_: []types.AuditLogPart{
+				types.AuditLogPartRequestHeaders,
+				types.AuditLogPartUploadedFiles,
+				types.AuditLogPartRulesMatched,
+			},
+			Transaction_: Transaction{
+				UnixTimestamp_: 1136239460,
+				ID_:            "partj-nofiles",
+				Request_: &TransactionRequest{
+					URI_:      "/upload",
+					Method_:   "POST",
+					Protocol_: "HTTP/1.1",
+				},
+			},
+			Messages_: []plugintypes.AuditLogMessage{
+				&Message{
+					Message_: "test",
+					Data_:    &MessageData{Msg_: "test", Raw_: `SecAction "id:201"`},
+				},
+			},
+		}
+
+		data, err := f.Format(al)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var wra application.WebResourcesActivity
+		if err := json.Unmarshal(data, &wra); err != nil {
+			t.Fatal(err)
+		}
+
+		for _, obs := range wra.Observables {
+			if obs.Type == "File Name" || obs.Type == "Size" || obs.Type == "Mime" {
+				t.Errorf("unexpected file observable found: %s = %s", obs.Type, obs.Value)
+			}
+		}
+	})
 }
 
 func createAuditLogs() []*Log {
@@ -334,7 +462,7 @@ func createAuditLogs() []*Log {
 		},
 	})
 
-	// Test case for abnormal transaction (all empty values, no arguments, no reponse)
+	// Test case for abnormal transaction (all empty values, no arguments, no response)
 	getArgs = collections.NewMap(variables.ArgsGet)
 	postArgs = collections.NewMap(variables.ArgsPost)
 	pathArgs = collections.NewMap(variables.ArgsPath)

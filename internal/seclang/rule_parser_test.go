@@ -4,12 +4,15 @@
 package seclang
 
 import (
+	"bytes"
 	"errors"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/corazawaf/coraza/v3/debuglog"
 	"github.com/corazawaf/coraza/v3/internal/corazawaf"
+	"github.com/corazawaf/coraza/v3/types"
 )
 
 func TestInvalidRule(t *testing.T) {
@@ -36,25 +39,35 @@ func TestVariables(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	err = p.FromString(`SecRule &REQUEST_COOKIES_NAMES:'/^(?:phpMyAdminphp|MyAdmin_https)$/' "id:2"`)
+	err = p.FromString(`SecRule &REQUEST_COOKIES_NAMES:'/^(?:phpMyAdminphp|MyAdmin_https)$/' "" "id:2"`)
 	if err != nil {
 		t.Error(err)
 	}
-	err = p.FromString(`SecRule &REQUEST_COOKIES_NAMES:'/^(?:phpMyAdminphp|MyAdmin_https)$/'|ARGS:test "id:3"`)
+	err = p.FromString(`SecRule &REQUEST_COOKIES_NAMES:'/^(?:phpMyAdminphp|MyAdmin_https)$/'|ARGS:test "" "id:3"`)
 	if err != nil {
 		t.Error(err)
 	}
-	err = p.FromString(`SecRule &REQUEST_COOKIES_NAMES:'/.*/'|ARGS:/a|b/ "id:4"`)
+	err = p.FromString(`SecRule &REQUEST_COOKIES_NAMES:'/.*/'|ARGS:/a|b/ "" "id:4"`)
 	if err != nil {
 		t.Error(err)
 	}
 
-	err = p.FromString(`SecRule &REQUEST_COOKIES_NAMES:'/.*/'|ARGS:/a|b/|XML:/*|ARGS|REQUEST_HEADERS "id:5"`)
+	err = p.FromString(`SecRule &REQUEST_COOKIES_NAMES:'/.*/'|ARGS:/a|b/|XML:/*|ARGS|REQUEST_HEADERS "" "id:5"`)
 	if err != nil {
 		t.Error(err)
 	}
 
 	err = p.FromString(`SecRule XML:/*|XML://@* "" "id:6"`)
+	if err != nil {
+		t.Error(err)
+	}
+
+	err = p.FromString(`SecRule REQUEST_HEADERS "@rx C:\\" "id:7"`)
+	if err != nil {
+		t.Error(err)
+	}
+
+	err = p.FromString(`SecRule REQUEST_HEADERS "@contains \"" "id:8"`)
 	if err != nil {
 		t.Error(err)
 	}
@@ -252,6 +265,41 @@ func TestInvalidOperatorRuleData(t *testing.T) {
 	}
 }
 
+func TestParseActionOperatorUnescaping(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		wantOp string
+	}{
+		{
+			name:   "escaped double quote",
+			input:  `ARGS:id "@contains \"" "id:1,phase:1,deny,status:403"`,
+			wantOp: `@contains "`,
+		},
+		{
+			name:   "escaped backslash stays",
+			input:  `REQUEST_HEADERS "@rx C:\\" "id:2"`,
+			wantOp: `@rx C:\\`,
+		},
+		{
+			name:   "no escapes",
+			input:  `ARGS "@contains test" "id:3"`,
+			wantOp: `@contains test`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, op, _, err := parseActionOperator(tt.input)
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+			if op != tt.wantOp {
+				t.Errorf("parseActionOperator() op = %q, want %q", op, tt.wantOp)
+			}
+		})
+	}
+}
+
 func TestRawChainedRules(t *testing.T) {
 	waf := corazawaf.NewWAF()
 	p := NewParser(waf)
@@ -272,6 +320,159 @@ func TestRawChainedRules(t *testing.T) {
 		if !strings.HasPrefix(r, "SecRule REQUEST_URI ") {
 			t.Errorf("unexpected rule at line %d: %s", i, r)
 		}
+	}
+}
+
+// wantChainDisruptiveErr is the sentinel text every rejection must contain,
+// distinguishing it from unrelated parse or init failures.
+const wantChainDisruptiveErr = "disruptive actions can only be specified in the chain starter rule"
+
+func TestChainedRuleDisruptiveActionRejected(t *testing.T) {
+	// ModSecurity and compatible engines reject configs where a chained (non-starter)
+	// rule carries a disruptive action. Coraza must do the same so that rule sets
+	// behave identically across implementations.
+	disruptiveActions := []string{"deny", "block", "allow", "pass", "redirect:'http://example.com'"}
+	for _, da := range disruptiveActions {
+		t.Run(da, func(t *testing.T) {
+			waf := corazawaf.NewWAF()
+			p := NewParser(waf)
+			err := p.FromString(`SecRule REQUEST_URI "abc" "id:100,phase:2,chain"
+SecRule REQUEST_URI "def" "` + da + `"`)
+			if err == nil {
+				t.Fatalf("expected error for disruptive action %q on chain member, got nil", da)
+			}
+			if !strings.Contains(err.Error(), wantChainDisruptiveErr) {
+				t.Errorf("wrong error for %q: want %q in error, got: %s", da, wantChainDisruptiveErr, err)
+			}
+		})
+	}
+}
+
+func TestChainedRuleDisruptiveActionAllowedOnStarter(t *testing.T) {
+	// Disruptive actions on the chain-starter rule are valid. Positive cases:
+	// (a) explicit deny on the starter, empty-action member
+	// (b) implicit phase-2 default (which injects "pass") with an empty-action member —
+	//     the injected pass must NOT be mistaken for a user-specified disruptive action.
+	tests := []struct {
+		name  string
+		rules string
+	}{
+		{
+			name: "explicit deny on starter, empty member",
+			rules: `SecRule REQUEST_URI "abc" "id:101,phase:2,deny,status:403,chain"
+SecRule REQUEST_URI "def" ""`,
+		},
+		{
+			name: "implicit default pass injected into member must not be flagged",
+			rules: `SecRule REQUEST_URI "abc" "id:102,phase:2,chain"
+SecRule REQUEST_URI "def" ""`,
+		},
+		{
+			name: "explicit SecDefaultAction deny must not flag empty-action member",
+			rules: `SecDefaultAction "phase:2,deny,status:403,log"
+SecRule REQUEST_URI "abc" "id:103,phase:2,chain"
+SecRule REQUEST_URI "def" ""`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			waf := corazawaf.NewWAF()
+			p := NewParser(waf)
+			if err := p.FromString(tc.rules); err != nil {
+				t.Errorf("unexpected error for %q: %s", tc.name, err)
+			}
+		})
+	}
+}
+
+func TestChainedRuleDisruptiveActionDeepChain(t *testing.T) {
+	// A disruptive action on the 2nd or 3rd link in a 3-rule chain must both be caught.
+	tests := []struct {
+		name  string
+		rules string
+	}{
+		{
+			name: "disruptive on second link",
+			rules: `SecRule REQUEST_URI "abc" "id:300,phase:2,chain"
+SecRule REQUEST_URI "def" "deny,chain"
+SecRule REQUEST_URI "ghi" ""`,
+		},
+		{
+			name: "disruptive on third link",
+			rules: `SecRule REQUEST_URI "abc" "id:301,phase:2,chain"
+SecRule REQUEST_URI "def" "chain"
+SecRule REQUEST_URI "ghi" "deny"`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			waf := corazawaf.NewWAF()
+			p := NewParser(waf)
+			err := p.FromString(tc.rules)
+			if err == nil {
+				t.Fatalf("expected error for %s, got nil", tc.name)
+			}
+			if !strings.Contains(err.Error(), wantChainDisruptiveErr) {
+				t.Errorf("wrong error for %s: want %q in error, got: %s", tc.name, wantChainDisruptiveErr, err)
+			}
+		})
+	}
+}
+
+func TestChainedRuleDisruptiveActionDropsWholeChain(t *testing.T) {
+	// When a chain-member is rejected the whole pending chain (starter + any
+	// already-attached members) must be removed from the rule set, not just
+	// patched. After the error the WAF must contain no rules, and a subsequent
+	// top-level rule must load as a fresh independent rule.
+	waf := corazawaf.NewWAF()
+	p := NewParser(waf)
+
+	_ = p.FromString(`SecRule REQUEST_URI "abc" "id:500,phase:2,chain"
+SecRule REQUEST_URI "def" "deny"`)
+
+	if got := len(waf.Rules.GetRules()); got != 0 {
+		t.Errorf("expected 0 rules after rejected chain, got %d", got)
+	}
+
+	if err := p.FromString(`SecRule REQUEST_URI "xyz" "id:501,phase:2"`); err != nil {
+		t.Fatalf("subsequent rule failed: %s", err)
+	}
+	rules := waf.Rules.GetRules()
+	if len(rules) != 1 || rules[0].ID_ != 501 {
+		t.Errorf("expected rule 501 to be standalone, got %v", rules)
+	}
+}
+
+func TestChainedRuleDisruptiveActionErrorMentionsParentID(t *testing.T) {
+	// The error message must identify the parent rule so authors can pinpoint
+	// which chain needs fixing.
+	waf := corazawaf.NewWAF()
+	p := NewParser(waf)
+	err := p.FromString(`SecRule REQUEST_URI "abc" "id:999,phase:2,chain"
+SecRule REQUEST_URI "def" "deny"`)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), wantChainDisruptiveErr) {
+		t.Errorf("wrong error: want %q, got: %s", wantChainDisruptiveErr, err)
+	}
+	if !strings.Contains(err.Error(), "999") {
+		t.Errorf("error message should contain the parent rule id 999, got: %s", err.Error())
+	}
+}
+
+func TestChainedRuleDisruptiveActionSecActionMember(t *testing.T) {
+	// SecAction uses the !WithOperator parse path; disruptive actions on a
+	// SecAction chain member must be caught just like SecRule members.
+	waf := corazawaf.NewWAF()
+	p := NewParser(waf)
+	err := p.FromString(`SecRule REQUEST_URI "abc" "id:400,phase:2,chain"
+SecAction "deny"`)
+	if err == nil {
+		t.Fatal("expected error for disruptive action on SecAction chain member, got nil")
+	}
+	if !strings.Contains(err.Error(), wantChainDisruptiveErr) {
+		t.Errorf("wrong error: want %q, got: %s", wantChainDisruptiveErr, err)
 	}
 }
 
@@ -303,9 +504,81 @@ func TestParseRule(t *testing.T) {
 	}
 }
 
+func TestNonSelectableCollection(t *testing.T) {
+	waf := corazawaf.NewWAF()
+	p := NewParser(waf)
+	err := p.FromString(`
+	SecRule REQUEST_URI:foo "bar" "id:1,phase:1"
+	`)
+	if err == nil {
+		t.Error("expected error")
+	}
+}
+
+func TestParseActions(t *testing.T) {
+	tests := []struct {
+		name            string
+		inputActions    string
+		expectedLogLine string
+		expectError     bool
+	}{
+		{
+			name:         "Valid actions with ID and phase",
+			inputActions: "id:1,phase:1,log,deny",
+			expectError:  false,
+		},
+		{
+			name:         "invalid action",
+			inputActions: "id:1,phase:2,notvalidaction",
+			expectError:  true,
+		},
+		{
+			name:         "unclosed quotes",
+			inputActions: "id:1,phase:2,log,deny,msg:'message not closed",
+			// TODO(4.x): returning an error in Coraza 3.x would break all the installations with coraza.conf-recommended that comes
+			// with an unclosed message in rule id 200003.
+			expectError:     false,
+			expectedLogLine: "[WARN] unclosed quotes",
+		},
+		{
+			name:            "unclosed quotes #2",
+			inputActions:    "id:1,phase:2,log,deny,tag:'this_is_a_tag,logdata:'log data'",
+			expectError:     false,
+			expectedLogLine: "[WARN] unclosed quotes",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rp := &RuleParser{
+				rule:           corazawaf.NewRule(),
+				defaultActions: map[types.RulePhase][]ruleAction{},
+				options: RuleOptions{
+					WAF: corazawaf.NewWAF(),
+				},
+			}
+			logsBuf := &bytes.Buffer{}
+			rp.options.WAF.Logger = debuglog.Default().WithLevel(debuglog.LevelWarn).WithOutput(logsBuf)
+
+			err := rp.ParseActions(tt.inputActions)
+			if tt.expectError && err == nil {
+				t.Errorf("expected error")
+			} else if !tt.expectError && err != nil {
+				t.Errorf("unexpected error: %s", err.Error())
+			}
+			if tt.expectedLogLine == "" && logsBuf.Len() > 0 {
+				t.Errorf("expected empty warn debug log, got %q", logsBuf.String())
+			}
+			if tt.expectedLogLine != "" && !strings.Contains(logsBuf.String(), tt.expectedLogLine) {
+				t.Errorf("expected debug log containing %q, got %q", tt.expectedLogLine, logsBuf.String())
+			}
+		})
+	}
+}
+
 func BenchmarkParseActions(b *testing.B) {
 	actionsToBeParsed := "id:980170,phase:5,pass,t:none,noauditlog,msg:'Anomaly Scores:Inbound Scores - Outbound Scores',tag:test"
 	for i := 0; i < b.N; i++ {
-		_, _ = parseActions(actionsToBeParsed)
+		_, _ = parseActions(nil, actionsToBeParsed)
 	}
 }
