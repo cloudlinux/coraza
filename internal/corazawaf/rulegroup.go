@@ -161,11 +161,9 @@ func (rg *RuleGroup) Eval(phase types.RulePhase, tx *Transaction) bool {
 	usedRules := 0
 	ts := time.Now().UnixNano()
 	transformationCache := tx.transformationCache
-	tx.mx.Lock()
 	for k := range transformationCache {
 		delete(transformationCache, k)
 	}
-	tx.mx.Unlock()
 RulesLoop:
 	for i := range rg.rules {
 		r := &rg.rules[i]
@@ -286,9 +284,8 @@ RulesLoop:
 	}
 	// Reset Skip counter at the end of each phase. Skip actions work only within the current processing phase
 	tx.Skip = 0
-	tx.mx.Lock()
+
 	tx.stopWatches[phase] = time.Now().UnixNano() - ts
-	tx.mx.Unlock()
 	return tx.IsInterrupted()
 }
 

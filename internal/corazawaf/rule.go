@@ -257,9 +257,7 @@ func (r *Rule) doEvaluate(logger debuglog.Logger, phase types.RulePhase, tx *Tra
 					args, errs = r.transformMultiMatchArg(arg)
 					argsLen = len(args)
 				} else {
-					tx.mx.Lock()
 					args[0], errs = r.transformArg(arg, i, cache)
-					tx.mx.Unlock()
 					argsLen = 1
 				}
 				if len(errs) > 0 {

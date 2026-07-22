@@ -61,8 +61,6 @@ func (c *NamedCollection) Len() int {
 
 // Data is an internal method used for serializing to JSON
 func (c *NamedCollection) Data() map[string][]string {
-	c.mx.RLock()
-	defer c.mx.RUnlock()
 	result := make(map[string][]string, len(c.data))
 	for k, v := range c.data {
 		result[k] = make([]string, len(v))
@@ -103,8 +101,6 @@ type NamedCollectionNames struct {
 }
 
 func (c *NamedCollectionNames) FindRegex(key *regexp.Regexp) []types.MatchData {
-	c.collection.mx.RLock()
-	defer c.collection.mx.RUnlock()
 	n := 0
 	// Collect matching data slices in a single pass to avoid evaluating the regex twice per key.
 	var matched [][]keyValue
@@ -135,8 +131,6 @@ func (c *NamedCollectionNames) FindRegex(key *regexp.Regexp) []types.MatchData {
 }
 
 func (c *NamedCollectionNames) FindString(key string) []types.MatchData {
-	c.collection.mx.RLock()
-	defer c.collection.mx.RUnlock()
 	data, ok := c.collection.data[key]
 	if !ok || len(data) == 0 {
 		return nil
@@ -159,8 +153,6 @@ func (c *NamedCollectionNames) Get(key string) []string {
 }
 
 func (c *NamedCollectionNames) FindAll() []types.MatchData {
-	c.collection.mx.RLock()
-	defer c.collection.mx.RUnlock()
 	n := 0
 	for _, data := range c.collection.data {
 		n += len(data)
