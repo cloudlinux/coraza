@@ -149,7 +149,7 @@ func (p *Parser) parseString(data string) error {
 
 func (p *Parser) evaluateLine(l string) error {
 	if l == "" || l[0] == '#' {
-		panic("invalid line")
+		return errors.New("invalid line")
 	}
 	// first we get the directive
 	dir, opts, _ := strings.Cut(l, " ")

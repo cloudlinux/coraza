@@ -6,7 +6,6 @@ package collections
 import (
 	"regexp"
 	"strings"
-	"sync"
 
 	"github.com/corazawaf/coraza/v3/collection"
 	"github.com/corazawaf/coraza/v3/internal/corazarules"
@@ -19,7 +18,6 @@ type Map struct {
 	isCaseSensitive bool
 	data            map[string][]keyValue
 	variable        variables.RuleVariable
-	mx              sync.RWMutex
 }
 
 var _ collection.Map = &Map{}
@@ -43,8 +41,6 @@ func NewCaseSensitiveKeyMap(variable variables.RuleVariable) *Map {
 }
 
 func (c *Map) Get(key string) []string {
-	c.mx.RLock()
-	defer c.mx.RUnlock()
 	if len(c.data) == 0 {
 		return nil
 	}
@@ -64,18 +60,30 @@ func (c *Map) Get(key string) []string {
 
 // FindRegex returns all map elements whose key matches the regular expression.
 func (c *Map) FindRegex(key *regexp.Regexp) []types.MatchData {
-	c.mx.RLock()
-	defer c.mx.RUnlock()
-	var result []types.MatchData
+	n := 0
+	// Collect matching data slices in a single pass to avoid evaluating the regex twice per key.
+	var matched [][]keyValue
 	for k, data := range c.data {
 		if key.MatchString(k) {
-			for _, d := range data {
-				result = append(result, &corazarules.MatchData{
-					Variable_: c.variable,
-					Key_:      d.key,
-					Value_:    d.value,
-				})
+			n += len(data)
+			matched = append(matched, data)
+		}
+	}
+	if n == 0 {
+		return nil
+	}
+	buf := make([]corazarules.MatchData, n)
+	result := make([]types.MatchData, n)
+	i := 0
+	for _, data := range matched {
+		for _, d := range data {
+			buf[i] = corazarules.MatchData{
+				Variable_: c.variable,
+				Key_:      d.key,
+				Value_:    d.value,
 			}
+			result[i] = &buf[i]
+			i++
 		}
 	}
 	return result
@@ -83,43 +91,53 @@ func (c *Map) FindRegex(key *regexp.Regexp) []types.MatchData {
 
 // FindString returns all map elements whose key matches the string.
 func (c *Map) FindString(key string) []types.MatchData {
-	var result []types.MatchData
 	if key == "" {
 		return c.FindAll()
 	}
-	c.mx.RLock()
-	defer c.mx.RUnlock()
 	if len(c.data) == 0 {
 		return nil
 	}
 	if !c.isCaseSensitive {
 		key = strings.ToLower(key)
 	}
-	// if key is not empty
-	if e, ok := c.data[key]; ok {
-		for _, aVar := range e {
-			result = append(result, &corazarules.MatchData{
-				Variable_: c.variable,
-				Key_:      aVar.key,
-				Value_:    aVar.value,
-			})
+	e, ok := c.data[key]
+	if !ok || len(e) == 0 {
+		return nil
+	}
+	buf := make([]corazarules.MatchData, len(e))
+	result := make([]types.MatchData, len(e))
+	for i, aVar := range e {
+		buf[i] = corazarules.MatchData{
+			Variable_: c.variable,
+			Key_:      aVar.key,
+			Value_:    aVar.value,
 		}
+		result[i] = &buf[i]
 	}
 	return result
 }
 
 // FindAll returns all map elements.
 func (c *Map) FindAll() []types.MatchData {
-	c.mx.RLock()
-	defer c.mx.RUnlock()
-	var result []types.MatchData
+	n := 0
+	for _, data := range c.data {
+		n += len(data)
+	}
+	if n == 0 {
+		return nil
+	}
+	buf := make([]corazarules.MatchData, n)
+	result := make([]types.MatchData, n)
+	i := 0
 	for _, data := range c.data {
 		for _, d := range data {
-			result = append(result, &corazarules.MatchData{
+			buf[i] = corazarules.MatchData{
 				Variable_: c.variable,
 				Key_:      d.key,
 				Value_:    d.value,
-			})
+			}
+			result[i] = &buf[i]
+			i++
 		}
 	}
 	return result
@@ -131,8 +149,6 @@ func (c *Map) Add(key string, value string) {
 	if !c.isCaseSensitive {
 		key = strings.ToLower(key)
 	}
-	c.mx.Lock()
-	defer c.mx.Unlock()
 	c.data[key] = append(c.data[key], aVal)
 }
 
@@ -142,8 +158,6 @@ func (c *Map) Set(key string, values []string) {
 	if !c.isCaseSensitive {
 		key = strings.ToLower(key)
 	}
-	c.mx.Lock()
-	defer c.mx.Unlock()
 	dataSlice, exists := c.data[key]
 	if !exists || cap(dataSlice) < len(values) {
 		dataSlice = make([]keyValue, len(values))
@@ -162,8 +176,6 @@ func (c *Map) SetIndex(key string, index int, value string) {
 	if !c.isCaseSensitive {
 		key = strings.ToLower(key)
 	}
-	c.mx.Lock()
-	defer c.mx.Unlock()
 	values := c.data[key]
 	av := keyValue{key: originalKey, value: value}
 
@@ -182,8 +194,6 @@ func (c *Map) Remove(key string) {
 	if !c.isCaseSensitive {
 		key = strings.ToLower(key)
 	}
-	c.mx.Lock()
-	defer c.mx.Unlock()
 	if len(c.data) == 0 {
 		return
 	}
@@ -197,8 +207,6 @@ func (c *Map) Name() string {
 
 // Reset removes all key/value pairs from the map.
 func (c *Map) Reset() {
-	c.mx.Lock()
-	defer c.mx.Unlock()
 	for k := range c.data {
 		delete(c.data, k)
 	}

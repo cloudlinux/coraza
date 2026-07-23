@@ -1,3 +1,6 @@
+// Copyright 2025 CloudLinux
+// SPDX-License-Identifier: Apache-2.0
+
 package persistence
 
 type NoopEngine struct{}

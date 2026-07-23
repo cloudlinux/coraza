@@ -1,3 +1,6 @@
+// Copyright 2026 Juan Pablo Tosso and the OWASP Coraza contributors
+// SPDX-License-Identifier: Apache-2.0
+
 package collections
 
 import (
@@ -88,23 +91,23 @@ func (c *Persistent) FindAll() []types.MatchData {
 }
 
 func (c *Persistent) SetOne(key string, value string) {
-	c.engine.Set(c.variable.Name(), c.collectionKey, key, value)
+	_ = c.engine.Set(c.variable.Name(), c.collectionKey, key, value)
 }
 
 func (c *Persistent) Set(key string, values []string) {
-	c.engine.Set(c.variable.Name(), c.collectionKey, key, values[0])
+	_ = c.engine.Set(c.variable.Name(), c.collectionKey, key, values[0])
 }
 
 func (c *Persistent) SetTTL(key string, ttl int) {
-	c.engine.SetTTL(c.variable.Name(), c.collectionKey, key, ttl)
+	_ = c.engine.SetTTL(c.variable.Name(), c.collectionKey, key, ttl)
 }
 
 func (c *Persistent) Remove(key string) {
-	c.engine.Remove(c.variable.Name(), c.collectionKey, key)
+	_ = c.engine.Remove(c.variable.Name(), c.collectionKey, key)
 }
 
 func (c *Persistent) Sum(key string, sum int) {
-	c.engine.Sum(c.variable.Name(), c.collectionKey, key, sum)
+	_ = c.engine.Sum(c.variable.Name(), c.collectionKey, key, sum)
 }
 
 func (c *Persistent) Name() string {

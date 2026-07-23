@@ -2,12 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //go:build mage
-// +build mage
 
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -23,7 +21,7 @@ import (
 
 var addLicenseVersion = "v1.1.1" // https://github.com/google/addlicense/releases
 var gosImportsVer = "v0.3.7"     // https://github.com/rinchsan/gosimports/releases
-var golangCILintVer = "v1.64.8"  // https://github.com/golangci/golangci-lint/releases
+var golangCILintVer = "v2.6.2"   // https://github.com/golangci/golangci-lint/releases
 var errNoGitDir = errors.New("no .git directory found")
 var errUpdateGeneratedFiles = errors.New("generated files need to be updated")
 
@@ -64,11 +62,11 @@ func Lint() error {
 		return err
 	}
 
-	if sh.Run("git", "diff", "--exit-code", "--", "'*.gen.go'") != nil {
+	if sh.Run("git", "diff", "--exit-code", "*.gen.go") != nil {
 		return errUpdateGeneratedFiles
 	}
 
-	if err := sh.RunV("go", "run", fmt.Sprintf("github.com/golangci/golangci-lint/cmd/golangci-lint@%s", golangCILintVer), "run"); err != nil {
+	if err := sh.RunV("go", "run", fmt.Sprintf("github.com/golangci/golangci-lint/v2/cmd/golangci-lint@%s", golangCILintVer), "run"); err != nil {
 		return err
 	}
 
@@ -109,7 +107,7 @@ func Test() error {
 		return err
 	}
 
-	if err := sh.RunV("go", "test", "-tags=memoize_builders", "./..."); err != nil {
+	if err := sh.RunV("go", "test", "-tags=coraza.no_memoize", "./..."); err != nil {
 		return err
 	}
 
@@ -121,7 +119,7 @@ func Test() error {
 		return err
 	}
 
-	if err := sh.RunV("go", "test", "-tags=memoize_builders", "./testing/coreruleset"); err != nil {
+	if err := sh.RunV("go", "test", "-tags=coraza.no_memoize", "./testing/coreruleset"); err != nil {
 		return err
 	}
 
@@ -183,8 +181,8 @@ func Coverage() error {
 	if err := sh.RunV("go", "test", tagsCmd, "-coverprofile=build/coverage-ftw.txt", "-covermode=atomic", "-coverpkg=./...", "./testing/coreruleset"); err != nil {
 		return err
 	}
-	// we run tinygo tag only if memoize_builders is not enabled
-	if !strings.Contains(tags, "memoize_builders") {
+	// we run tinygo tag only if coraza.no_memoize is not enabled
+	if !strings.Contains(tags, "coraza.no_memoize") {
 		if tagsCmd != "" {
 			tagsCmd += ",tinygo"
 		}
@@ -196,7 +194,7 @@ func Coverage() error {
 	return sh.RunV("go", "tool", "cover", "-html=build/coverage.txt", "-o", "build/coverage.html")
 }
 
-// Fuzz runs fuzz tests
+// Fuzz runs fuzz tests.
 func Fuzz() error {
 	// Go must be run once per test when fuzzing
 	tests := []struct {
@@ -223,7 +221,7 @@ func Fuzz() error {
 	for _, pkgTests := range tests {
 		for _, test := range pkgTests.tests {
 			fmt.Println("Running", test)
-			if err := sh.RunV("go", "test", "-fuzz="+test, "-fuzztime=2m", pkgTests.pkg); err != nil {
+			if err := sh.RunV("go", "test", "-fuzz="+test, "-fuzztime=3m", pkgTests.pkg); err != nil {
 				return err
 			}
 		}
@@ -232,12 +230,12 @@ func Fuzz() error {
 	return nil
 }
 
-// Doc runs godoc, access at http://localhost:6060
+// Doc runs godoc, access at http://localhost:6060.
 func Doc() error {
 	return sh.RunV("go", "run", "golang.org/x/tools/cmd/godoc@latest", "-http=:6060")
 }
 
-// Precommit installs a git hook to run check when committing
+// Precommit installs a git hook to run check when committing.
 func Precommit() error {
 	if _, err := os.Stat(filepath.Join(".git", "hooks")); os.IsNotExist(err) {
 		return errNoGitDir
@@ -254,45 +252,4 @@ func Precommit() error {
 // Check runs lint and tests.
 func Check() {
 	mg.SerialDeps(Lint, Test)
-}
-
-// combinations generates all possible combinations of build tags
-func combinations(tags []string) []string {
-	var result []string
-	n := len(tags)
-	for i := 0; i < (1 << n); i++ {
-		var combo []string
-		for j := 0; j < n; j++ {
-			if i&(1<<j) != 0 {
-				combo = append(combo, tags[j])
-			}
-		}
-		if len(combo) > 0 {
-			result = append(result, strings.Join(combo, ","))
-		} else {
-			result = append(result, "")
-		}
-	}
-	return result
-}
-
-// Generates a JSON output to stdout which contains all permutations of build tags for the project.
-func TagsMatrix() error {
-	tags := []string{
-		"coraza.rule.case_sensitive_args_keys",
-		"coraza.rule.no_regex_multiline",
-		"memoize_builders",
-		"coraza.rule.multiphase_evaluation",
-		"no_fs_access",
-	}
-	combos := combinations(tags)
-
-	jsonData, err := json.Marshal(combos)
-	if err != nil {
-		fmt.Println("Error generating JSON:", err)
-		return nil
-	}
-
-	fmt.Println(string(jsonData))
-	return nil
 }
