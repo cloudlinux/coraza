@@ -80,7 +80,11 @@ func NewWAF(config WAFConfig) (WAF, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to create persistence engine: %w", err)
 		}
-	} else {
+	}
+	// A provider is free to hand back a nil engine, which persistence.SetEngine
+	// documents as disabling persistence. The persistent collections dereference
+	// the engine unconditionally, so substitute the noop rather than store nil.
+	if engine == nil {
 		engine = persistence.NoopEngine{}
 	}
 
