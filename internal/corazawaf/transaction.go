@@ -153,6 +153,30 @@ func (tx *Transaction) SetScriptUsername(value string) {
 	tx.variables.scriptUsername.Set(value)
 }
 
+// TruncateRequestBody releases the buffered request body, keeping at most
+// limit bytes as a preview for audit logging. See types.Transaction for the
+// full contract. The REQUEST_BODY variable is truncated to the same prefix
+// (copied, so the original backing string is released); REQUEST_BODY_LENGTH
+// and parsed derivatives such as ARGS_POST are left intact.
+func (tx *Transaction) TruncateRequestBody(limit int64) error {
+	if limit < 0 {
+		return errors.New("limit must be non-negative")
+	}
+	// lastPhase only advances when rules are evaluated, so it stays behind
+	// when the engine is off or the transaction was interrupted — states in
+	// which request-body analysis will never run and truncation is safe.
+	if tx.lastPhase < types.PhaseRequestBody && !tx.IsRuleEngineOff() && !tx.IsInterrupted() {
+		return errors.New("TruncateRequestBody must be called after ProcessRequestBody")
+	}
+	if err := tx.requestBodyBuffer.Truncate(limit); err != nil {
+		return err
+	}
+	if rb := tx.variables.requestBody.Get(); int64(len(rb)) > limit {
+		tx.variables.requestBody.Set(strings.Clone(rb[:limit]))
+	}
+	return nil
+}
+
 func (tx *Transaction) ID() string {
 	return tx.id
 }
