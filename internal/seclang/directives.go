@@ -842,7 +842,7 @@ func directiveSecAuditLogRelevantStatus(options *DirectiveOptions) error {
 		return errEmptyOptions
 	}
 
-	re, err := options.WAF.Memoizer().Do(options.Opts, func() (any, error) { return regexp.Compile(options.Opts) })
+	re, err := options.WAF.Memoizer().Do("auditstatus:"+options.Opts, func() (any, error) { return regexp.Compile(options.Opts) })
 	if err != nil {
 		return err
 	}

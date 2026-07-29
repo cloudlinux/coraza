@@ -64,7 +64,7 @@ func newPMFromFile(options plugintypes.OperatorOptions) (plugintypes.Operator, e
 		DFA:                  false,
 	})
 
-	m, _ := memoizeDo(options.Memoizer, strings.Join(options.Path, ",")+filepath, func() (any, error) { return builder.Build(lines), nil })
+	m, _ := memoizeDo(options.Memoizer, "pmfile:"+strings.Join(options.Path, ",")+filepath, func() (any, error) { return builder.Build(lines), nil })
 
 	return &pm{matcher: m.(ahocorasick.AhoCorasick)}, nil
 }
