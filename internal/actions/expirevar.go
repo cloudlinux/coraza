@@ -88,8 +88,9 @@ func (a *expirevarFn) Evaluate(r plugintypes.RuleMetadata, tx plugintypes.Transa
 		tx.DebugLogger().Error().Msg("collection in expirevar is not editable")
 		return
 	}
-	// update the TTL
-	key := a.key.Expand(tx)
+	// Lowercased to match setvar, which stores under a lowercased key, and the
+	// rule parser, which lowercases selectors on these collections.
+	key := strings.ToLower(a.key.Expand(tx))
 	col.SetTTL(key, a.ttl)
 }
 

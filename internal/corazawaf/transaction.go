@@ -2682,4 +2682,15 @@ func (v *TransactionVariables) reset() {
 		}
 		return true
 	})
+	// The persistent collections are deliberately absent from All(), which also
+	// drives format(): enumerating them there would query the persistence engine
+	// on every debug dump. They still carry per-transaction state - the collection
+	// key set by initcol - and transactions are recycled through a pool, so a
+	// stale key would make the next request read and write the previous request's
+	// collection instance.
+	v.global.Reset()
+	v.resource.Reset()
+	v.ip.Reset()
+	v.session.Reset()
+	v.user.Reset()
 }

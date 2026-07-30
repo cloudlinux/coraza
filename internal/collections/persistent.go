@@ -42,6 +42,13 @@ func (c *Persistent) Init(key string) {
 	c.collectionKey = key
 }
 
+// Reset drops the collection key set by initcol, returning the collection to
+// its uninitialized state. The persisted data itself is untouched: only this
+// transaction's choice of which collection instance to address is forgotten.
+func (c *Persistent) Reset() {
+	c.collectionKey = ""
+}
+
 func (c *Persistent) Get(key string) []string {
 	res, _ := c.engine.Get(c.variable.Name(), c.collectionKey, key)
 	return []string{res}

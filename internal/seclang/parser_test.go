@@ -414,10 +414,33 @@ func TestSelect(t *testing.T) {
 			rule:          `SecRule INBOUND_DATA_ERROR:foo "bar" "id:21"`,
 			expectedError: true,
 		},
+		// IP, GLOBAL, RESOURCE, USER and SESSION are persistent collections
+		// backed by the persistence engine; selecting a key inside them
+		// (SecRule IP:blocked) is their normal ModSecurity usage.
 		{
 			name:          "IP",
 			rule:          `SecRule IP:foo "bar" "id:22"`,
-			expectedError: true,
+			expectedError: false,
+		},
+		{
+			name:          "GLOBAL",
+			rule:          `SecRule GLOBAL:foo "bar" "id:220"`,
+			expectedError: false,
+		},
+		{
+			name:          "RESOURCE",
+			rule:          `SecRule RESOURCE:foo "bar" "id:221"`,
+			expectedError: false,
+		},
+		{
+			name:          "USER",
+			rule:          `SecRule USER:foo "bar" "id:222"`,
+			expectedError: false,
+		},
+		{
+			name:          "SESSION",
+			rule:          `SecRule SESSION:foo "bar" "id:223"`,
+			expectedError: false,
 		},
 		{
 			name:          "JSON",

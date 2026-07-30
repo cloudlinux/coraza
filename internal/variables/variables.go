@@ -705,15 +705,15 @@ const (
 	// ```
 	Userid
 	// IP is kept for compatibility
-	IP
+	IP // CanBeSelected
 	// Global is a persistent collection of global variables
-	Global
+	Global // CanBeSelected
 	// Resource is a persistent collection of resources
-	Resource
+	Resource // CanBeSelected
 	// User is a persistent collection of user variables
-	User
+	User // CanBeSelected
 	// Session is a persistent collection of session variables
-	Session
+	Session // CanBeSelected
 	// ScriptFilename Holds the full internal path to the script
 	// that will be used to serve the request
 	ScriptFilename

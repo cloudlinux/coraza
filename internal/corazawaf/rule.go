@@ -576,7 +576,7 @@ func (r *Rule) AddVariable(v variables.RuleVariable, key string, iscount bool) e
 		if !caseSensitiveVariable(v) {
 			rx = strings.ToLower(rx)
 		}
-		if vare, err := r.memoizeDo(rx, func() (any, error) { return regexp.Compile(rx) }); err != nil {
+		if vare, err := r.memoizeDo("var:"+rx, func() (any, error) { return regexp.Compile(rx) }); err != nil {
 			return err
 		} else {
 			re = vare.(*regexp.Regexp)
@@ -623,7 +623,7 @@ func (r *Rule) AddVariableNegation(v variables.RuleVariable, key string) error {
 		if !caseSensitiveVariable(v) {
 			rx = strings.ToLower(rx)
 		}
-		if vare, err := r.memoizeDo(rx, func() (any, error) { return regexp.Compile(rx) }); err != nil {
+		if vare, err := r.memoizeDo("var:"+rx, func() (any, error) { return regexp.Compile(rx) }); err != nil {
 			return err
 		} else {
 			re = vare.(*regexp.Regexp)

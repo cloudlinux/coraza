@@ -309,6 +309,16 @@ func (v RuleVariable) CanBeSelected() bool {
 		return true
 	case MultipartPartHeaders:
 		return true
+	case IP:
+		return true
+	case Global:
+		return true
+	case Resource:
+		return true
+	case User:
+		return true
+	case Session:
+		return true
 	default:
 		return false
 	}
