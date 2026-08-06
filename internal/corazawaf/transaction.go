@@ -1830,6 +1830,14 @@ func (tx *Transaction) Close() error {
 	}
 
 	tx.variables.reset()
+	// Drop per-request references so the pooled transaction does not keep
+	// matched rules, transformed values or the other per-request state reachable
+	// until the transaction is reused.
+	tx.matchedRules = nil
+	tx.detectionOnlyInterruption = nil
+	tx.context = nil
+	tx.ruleFilter = nil
+	clear(tx.transformationCache)
 	if err := tx.requestBodyBuffer.Reset(); err != nil {
 		errs = append(errs, fmt.Errorf("reseting request body buffer: %v", err))
 	}

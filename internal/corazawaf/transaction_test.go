@@ -3070,6 +3070,130 @@ func TestUploadKeepFiles(t *testing.T) {
 	})
 }
 
+func TestCloseReleasesPerRequestReferences(t *testing.T) {
+	waf := NewWAF()
+	tx := waf.NewTransaction()
+
+	rule := NewRule()
+	rule.ID_ = 1234
+	rule.Log = true
+	for i := 0; i < 10; i++ {
+		tx.MatchRule(rule, []types.MatchData{
+			&corazarules.MatchData{
+				Variable_: variables.ArgsPost,
+				Key_:      "key",
+				Value_:    "value",
+			},
+		})
+	}
+	tx.detectionOnlyInterruption = &types.Interruption{Status: 403}
+	tx.transformationCache[transformationKey{argIndex: 1}] = transformationValue{arg: "value"}
+	tx.SetRuleFilter(&RuleFilterWrapper{})
+
+	if err := tx.Close(); err != nil {
+		t.Fatalf("Failed to close transaction: %s", err.Error())
+	}
+
+	mrs := tx.matchedRules
+	// Reslicing to zero length would keep every matched rule reachable through
+	// the backing array, so the slice itself must be released.
+	if mrs != nil {
+		t.Errorf("expected matched rules to be released after Close, got %d entries with capacity %d", len(mrs), cap(mrs))
+	}
+	if tx.ruleFilter != nil {
+		t.Error("expected ruleFilter to be nil after Close")
+	}
+	if tx.detectionOnlyInterruption != nil {
+		t.Error("expected detectionOnlyInterruption to be nil after Close")
+	}
+	if tx.context != nil {
+		t.Error("expected context to be nil after Close")
+	}
+	if len(tx.transformationCache) != 0 {
+		t.Errorf("expected empty transformation cache after Close, got %d entries", len(tx.transformationCache))
+	}
+}
+
+func TestCloseKeepsRelevantFilesBeforeReleasingMatchedRules(t *testing.T) {
+	if !environment.HasAccessToFS {
+		t.Skip("skipping test as it requires access to filesystem")
+	}
+
+	waf := NewWAF()
+	waf.UploadKeepFiles = types.UploadKeepFilesRelevantOnly
+	tx := waf.NewTransaction()
+
+	f, err := os.CreateTemp(t.TempDir(), "crztest*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpFile := f.Name()
+	if err := f.Close(); err != nil {
+		t.Fatalf("failed to close temp file: %v", err)
+	}
+	tx.Variables().FilesTmpNames().(*collections.Map).Add("", tmpFile)
+
+	tx.matchedRules = append(tx.matchedRules, &corazarules.MatchedRule{Log_: true})
+
+	if err := tx.Close(); err != nil {
+		t.Fatalf("Failed to close transaction: %s", err.Error())
+	}
+
+	if _, err := os.Stat(tmpFile); err != nil {
+		t.Fatal("expected temp file to be kept when a log-relevant rule matched")
+	}
+	if tx.matchedRules != nil {
+		t.Error("expected matched rules to be released after Close")
+	}
+}
+
+func TestTransactionReuseAfterClose(t *testing.T) {
+	waf := NewWAF()
+	tx := waf.NewTransaction()
+
+	rule := NewRule()
+	rule.ID_ = 1234
+	rule.Log = true
+	tx.MatchRule(rule, []types.MatchData{
+		&corazarules.MatchData{Variable_: variables.UniqueID},
+	})
+	tx.detectionOnlyInterruption = &types.Interruption{Status: 403}
+	tx.ForceRequestBodyVariable = true
+	tx.ForceResponseBodyVariable = true
+
+	if err := tx.Close(); err != nil {
+		t.Fatalf("Failed to close transaction: %s", err.Error())
+	}
+
+	tx2 := waf.NewTransaction()
+	if len(tx2.matchedRules) != 0 {
+		t.Errorf("expected no matched rules on a fresh transaction, got %d", len(tx2.matchedRules))
+	}
+	if tx2.detectionOnlyInterruption != nil {
+		t.Error("expected no detection-only interruption on a fresh transaction")
+	}
+	// A stale force flag makes the next request buffer and parse a body its own
+	// configuration excludes.
+	if tx2.ForceRequestBodyVariable {
+		t.Error("expected ForceRequestBodyVariable to be unset on a fresh transaction")
+	}
+	if tx2.ForceResponseBodyVariable {
+		t.Error("expected ForceResponseBodyVariable to be unset on a fresh transaction")
+	}
+	if tx2.context == nil {
+		t.Error("expected a fresh transaction to have a context")
+	}
+
+	tx2.ProcessConnection("127.0.0.1", 8080, "127.0.0.1", 80)
+	tx2.ProcessURI("/test", "GET", "HTTP/1.1")
+	if it := tx2.ProcessRequestHeaders(); it != nil {
+		t.Errorf("unexpected interruption on a fresh transaction: %+v", it)
+	}
+	if err := tx2.Close(); err != nil {
+		t.Fatalf("Failed to close transaction: %s", err.Error())
+	}
+}
+
 func TestRequestFilename(t *testing.T) {
 	tests := []struct {
 		name     string
