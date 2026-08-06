@@ -5,6 +5,9 @@ package bodyprocessors
 
 import (
 	"errors"
+	"fmt"
+	"math"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -183,7 +186,7 @@ func TestReadJSON(t *testing.T) {
 	for _, tc := range jsonTests {
 		tt := tc
 		t.Run(tt.name, func(t *testing.T) {
-			jsonMap, err := readJSON(tt.json, maxRecursion)
+			jsonMap, err := readJSON(tt.json, maxRecursion, 0)
 
 			// Special case for nested_empty - just check that the function doesn't error
 			if tt.name == "nested_empty" {
@@ -230,7 +233,7 @@ func mapKeys(m map[string]string) []string {
 }
 
 func TestInvalidJSON(t *testing.T) {
-	_, err := readJSON(`{invalid json`, maxRecursion)
+	_, err := readJSON(`{invalid json`, maxRecursion, 0)
 	if err == nil {
 		// We expect an error for invalid JSON since we now validate
 		t.Error("Expected error for invalid JSON, got nil")
@@ -242,7 +245,7 @@ func BenchmarkReadJSON(b *testing.B) {
 		tt := tc
 		b.Run(tt.name, func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				_, err := readJSON(tt.json, maxRecursion)
+				_, err := readJSON(tt.json, maxRecursion, 0)
 				if err != nil {
 					b.Error(err)
 				}
@@ -257,7 +260,10 @@ func readJSONNoValidation(s string, maxRecursion int) (map[string]string, error)
 	json := gjson.Parse(s)
 	res := make(map[string]string)
 	key := []byte("json")
-	err := readItems(json, key, maxRecursion, res)
+	budget := len(s) + jsonDecodedBytesSlack
+	args := 0
+	lengths := 0
+	err := readItems(json, key, maxRecursion, 0, &args, &lengths, &budget, res)
 	return res, err
 }
 
@@ -303,7 +309,7 @@ func BenchmarkValidationOverhead(b *testing.B) {
 		b.Run("WithValidation/"+bc.name, func(b *testing.B) {
 			b.SetBytes(int64(len(bc.json)))
 			for i := 0; i < b.N; i++ {
-				if _, err := readJSON(bc.json, maxRecursion); err != nil {
+				if _, err := readJSON(bc.json, maxRecursion, 0); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -314,6 +320,70 @@ func BenchmarkValidationOverhead(b *testing.B) {
 				if _, err := readJSONNoValidation(bc.json, maxRecursion); err != nil {
 					b.Fatal(err)
 				}
+			}
+		})
+	}
+}
+
+// TestReadJSONArgumentsLimitAllocs asserts that readJSON stops flattening as
+// soon as the argument limit is reached: on a ~100k-member body with a limit
+// of 10 the allocation volume must stay in the KiB range, not scale with the
+// body.
+func TestReadJSONArgumentsLimitAllocs(t *testing.T) {
+	body := strings.Builder{}
+	body.WriteString("{")
+	for i := 0; i < 100000; i++ {
+		if i > 0 {
+			body.WriteString(",")
+		}
+		fmt.Fprintf(&body, `"key%06d":"value"`, i)
+	}
+	body.WriteString("}")
+	s := body.String()
+
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	res, err := readJSON(s, maxRecursion, 10)
+	runtime.ReadMemStats(&after)
+
+	if !errors.Is(err, ErrArgumentsLimit) {
+		t.Fatalf("expected ErrArgumentsLimit, got %v", err)
+	}
+	if want, have := 10, len(res); want != have {
+		t.Fatalf("unexpected number of members, want %d, have %d", want, have)
+	}
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 256<<10 {
+		t.Errorf("allocated %d bytes, expected at most %d", allocated, 256<<10)
+	}
+}
+
+// TestJSONDecodedBudget asserts the decoded-bytes budget a body earns: small
+// bodies earn a multiple of their own size, large ones stop at the ceiling, and
+// the multiplication is never allowed to wrap on a 32-bit target.
+func TestJSONDecodedBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		n    int
+		want int
+	}{
+		{name: "empty", n: 0, want: 0},
+		{name: "small_scales", n: 1000, want: 1000 + 1000*jsonDecodedBytesScale},
+		{name: "at_the_ceiling", n: jsonDecodedBytesSlack / jsonDecodedBytesScale, want: jsonDecodedBytesSlack/jsonDecodedBytesScale + jsonDecodedBytesSlack},
+		{name: "past_the_ceiling", n: 1 << 24, want: 1<<24 + jsonDecodedBytesSlack},
+		{name: "would_overflow", n: math.MaxInt/jsonDecodedBytesScale + 1, want: math.MaxInt/jsonDecodedBytesScale + 1 + jsonDecodedBytesSlack},
+		// n*jsonDecodedBytesScale wraps to a small positive value here, which
+		// would starve the budget rather than widen it, so it must be caught as
+		// surely as a product that wraps negative. The expression picks such an
+		// n at whatever width int has.
+		{name: "would_overflow_to_small_positive", n: math.MaxInt>>5 + 2, want: math.MaxInt>>5 + 2 + jsonDecodedBytesSlack},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if have := jsonDecodedBudget(tc.n); have != tc.want {
+				t.Errorf("unexpected budget for a %d byte body, want %d, have %d", tc.n, tc.want, have)
+			}
+			if jsonDecodedBudget(tc.n) < tc.n {
+				t.Errorf("budget for a %d byte body is below the body itself", tc.n)
 			}
 		})
 	}

@@ -225,6 +225,14 @@ func (tx *Transaction) Collection(idx variables.RuleVariable) collection.Collect
 		return tx.variables.reqbodyProcessorErrorMsg
 	case variables.ReqbodyProcessor:
 		return tx.variables.reqbodyProcessor
+	case variables.ResBodyError:
+		return tx.variables.resBodyError
+	case variables.ResBodyErrorMsg:
+		return tx.variables.resBodyErrorMsg
+	case variables.ResBodyProcessorError:
+		return tx.variables.resBodyProcessorError
+	case variables.ResBodyProcessorErrorMsg:
+		return tx.variables.resBodyProcessorErrorMsg
 	case variables.RequestBasename:
 		return tx.variables.requestBasename
 	case variables.RequestBody:
@@ -811,19 +819,23 @@ func (tx *Transaction) ProcessConnection(client string, cPort int, server string
 	tx.variables.serverPort.Set(p2)
 }
 
-// ExtractGetArguments transforms an url encoded string to a map and creates ARGS_GET
+// ExtractGetArguments decodes an url encoded query string into ARGS_GET in
+// document order, so which arguments survive the SecArgumentsLimit cut is
+// deterministic across requests.
 func (tx *Transaction) ExtractGetArguments(uri string) {
-	data := urlutil.ParseQuery(uri, '&')
-	for k, vs := range data {
-		for _, v := range vs {
-			tx.AddGetRequestArgument(k, v)
+	urlutil.EachQueryValue(uri, '&', func(k, v string) bool {
+		if tx.checkRequestArgumentLimit(tx.variables.argsGet) {
+			tx.debugLogger.Warn().Msg("skipping get request argument, over limit")
+			return false
 		}
-	}
+		tx.variables.argsGet.Add(k, v)
+		return true
+	})
 }
 
 // AddGetRequestArgument
 func (tx *Transaction) AddGetRequestArgument(key string, value string) {
-	if tx.checkArgumentLimit(tx.variables.argsGet) {
+	if tx.checkRequestArgumentLimit(tx.variables.argsGet) {
 		tx.debugLogger.Warn().Msg("skipping get request argument, over limit")
 		return
 	}
@@ -832,7 +844,7 @@ func (tx *Transaction) AddGetRequestArgument(key string, value string) {
 
 // AddPostRequestArgument
 func (tx *Transaction) AddPostRequestArgument(key string, value string) {
-	if tx.checkArgumentLimit(tx.variables.argsPost) {
+	if tx.checkRequestArgumentLimit(tx.variables.argsPost) {
 		tx.debugLogger.Warn().Msg("skipping post request argument, over limit")
 		return
 	}
@@ -841,20 +853,49 @@ func (tx *Transaction) AddPostRequestArgument(key string, value string) {
 
 // AddPathRequestArgument
 func (tx *Transaction) AddPathRequestArgument(key string, value string) {
-	if tx.checkArgumentLimit(tx.variables.argsPath) {
+	if tx.checkRequestArgumentLimit(tx.variables.argsPath) {
 		tx.debugLogger.Warn().Msg("skipping path request argument, over limit")
 		return
 	}
 	tx.variables.argsPath.Add(key, value)
 }
 
-func (tx *Transaction) checkArgumentLimit(c *collections.NamedCollection) bool {
-	return c.Len() >= tx.WAF.ArgumentLimit
+// argumentsLimitErrorMsg is the body error message a SecArgumentsLimit trip
+// reports, matching ModSecurity.
+const argumentsLimitErrorMsg = "SecArgumentsLimit exceeded"
+
+// signalArgumentsLimit raises the body error flag and message pair for a
+// SecArgumentsLimit trip. Once the flag is set the message is left alone.
+func signalArgumentsLimit(errorFlag, errorMsg *collections.Single) {
+	if errorFlag.Get() == "1" {
+		return
+	}
+	errorFlag.Set("1")
+	errorMsg.Set(argumentsLimitErrorMsg)
+}
+
+// checkArgumentLimit reports whether c has reached SecArgumentsLimit and, if it
+// has, raises the error flag and message pair covering c. Callers must stop
+// adding to c once it returns true.
+func (tx *Transaction) checkArgumentLimit(c interface{ Len() int }, errorFlag, errorMsg *collections.Single) bool {
+	if c.Len() < tx.WAF.ArgumentLimit {
+		return false
+	}
+	signalArgumentsLimit(errorFlag, errorMsg)
+	return true
+}
+
+// checkRequestArgumentLimit applies the limit to a request collection, so a
+// trip reports through REQBODY_ERROR.
+func (tx *Transaction) checkRequestArgumentLimit(c interface{ Len() int }) bool {
+	return tx.checkArgumentLimit(c, tx.variables.reqbodyError, tx.variables.reqbodyErrorMsg)
 }
 
 // AddResponseArgument
 func (tx *Transaction) AddResponseArgument(key string, value string) {
-	if tx.variables.responseArgs.Len() >= tx.WAF.ArgumentLimit {
+	// RESPONSE_ARGS is filled while the response is processed, so a trip
+	// reports through RES_BODY_ERROR rather than the request-side pair.
+	if tx.checkArgumentLimit(tx.variables.responseArgs, tx.variables.resBodyError, tx.variables.resBodyErrorMsg) {
 		tx.debugLogger.Warn().Msg("skipping response argument, over limit")
 		return
 	}
@@ -1187,9 +1228,22 @@ func (tx *Transaction) ProcessRequestBody() (*types.Interruption, error) {
 		Mime:                      mimeType,
 		StoragePath:               tx.WAF.UploadDir,
 		RequestBodyRecursionLimit: tx.WAF.RequestBodyJsonDepthLimit,
+		ArgumentLimit:             tx.WAF.ArgumentLimit,
 	}); err != nil {
-		tx.debugLogger.Error().Err(err).Msg("Failed to process request body")
-		tx.generateRequestBodyError(err)
+		switch {
+		case errors.Is(err, bodyprocessors.ErrJSONDecodedSize), errors.Is(err, bodyprocessors.ErrJSONRecursionLimit):
+			// Limit trips on a syntactically valid body, so they log at the same
+			// level as the argument limit and only their rule-visible signal
+			// differs. Error is kept for bodies the parser could not read.
+			tx.debugLogger.Warn().Err(err).Msg("Failed to process request body")
+			tx.generateRequestBodyError(err)
+		case errors.Is(err, bodyprocessors.ErrArgumentsLimit):
+			tx.debugLogger.Warn().Msg("skipping request body arguments, over SecArgumentsLimit; inspection truncated")
+			signalArgumentsLimit(tx.variables.reqbodyError, tx.variables.reqbodyErrorMsg)
+		default:
+			tx.debugLogger.Error().Err(err).Msg("Failed to process request body")
+			tx.generateRequestBodyError(err)
+		}
 		tx.WAF.Rules.Eval(types.PhaseRequestBody, tx)
 		return tx.interruption, nil
 	}
@@ -1416,9 +1470,21 @@ func (tx *Transaction) ProcessResponseBody() (*types.Interruption, error) {
 		}
 
 		tx.debugLogger.Debug().Str("body_processor", bp).Msg("Attempting to process response body")
-		if err := b.ProcessResponse(reader, tx.Variables(), plugintypes.BodyProcessorOptions{}); err != nil {
-			tx.debugLogger.Error().Err(err).Msg("Failed to process response body")
-			tx.generateResponseBodyError(err)
+		if err := b.ProcessResponse(reader, tx.Variables(), plugintypes.BodyProcessorOptions{
+			RequestBodyRecursionLimit: tx.WAF.RequestBodyJsonDepthLimit,
+			ArgumentLimit:             tx.WAF.ArgumentLimit,
+		}); err != nil {
+			switch {
+			case errors.Is(err, bodyprocessors.ErrJSONDecodedSize), errors.Is(err, bodyprocessors.ErrJSONRecursionLimit):
+				tx.debugLogger.Warn().Err(err).Msg("Failed to process response body")
+				tx.generateResponseBodyError(err)
+			case errors.Is(err, bodyprocessors.ErrArgumentsLimit):
+				tx.debugLogger.Warn().Msg("skipping response body arguments, over SecArgumentsLimit; inspection truncated")
+				signalArgumentsLimit(tx.variables.resBodyError, tx.variables.resBodyErrorMsg)
+			default:
+				tx.debugLogger.Error().Err(err).Msg("Failed to process response body")
+				tx.generateResponseBodyError(err)
+			}
 		}
 	} else {
 		buf := new(strings.Builder)
@@ -2592,6 +2658,18 @@ func (v *TransactionVariables) All(f func(v variables.RuleVariable, col collecti
 		return
 	}
 	if !f(variables.ResBodyProcessor, v.resBodyProcessor) {
+		return
+	}
+	if !f(variables.ResBodyError, v.resBodyError) {
+		return
+	}
+	if !f(variables.ResBodyErrorMsg, v.resBodyErrorMsg) {
+		return
+	}
+	if !f(variables.ResBodyProcessorError, v.resBodyProcessorError) {
+		return
+	}
+	if !f(variables.ResBodyProcessorErrorMsg, v.resBodyProcessorErrorMsg) {
 		return
 	}
 	if !f(variables.Rule, v.rule) {

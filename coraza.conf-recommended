@@ -76,6 +76,14 @@ SecRequestBodyLimitAction Reject
 # the request should be rejected (when deployed in blocking mode)
 # or a high-severity alert logged (when deployed in detection-only mode).
 #
+# This rule also fires when a request exceeds SecArgumentsLimit: the arguments
+# left out are the trailing ones, so an attacker who pads a request past the
+# limit chooses what goes uninspected. That case is told apart by
+# REQBODY_ERROR_MSG, logged below, reading "SecArgumentsLimit exceeded". If
+# legitimate traffic trips it, raise SecArgumentsLimit to cover it: that
+# restores full inspection, and the extra cost is paid only by requests that
+# really carry that many arguments.
+#
 SecRule REQBODY_ERROR "!@eq 0" \
     "id:'200002', phase:2,t:none,log,deny,status:400,msg:'Failed to parse request body.',logdata:'%{reqbody_error_msg}',severity:2"
 

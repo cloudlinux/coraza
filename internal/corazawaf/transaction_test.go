@@ -20,6 +20,7 @@ import (
 	"github.com/corazawaf/coraza/v3/debuglog"
 	"github.com/corazawaf/coraza/v3/experimental/plugins/macro"
 	"github.com/corazawaf/coraza/v3/experimental/plugins/plugintypes"
+	"github.com/corazawaf/coraza/v3/internal/bodyprocessors"
 	"github.com/corazawaf/coraza/v3/internal/collections"
 	"github.com/corazawaf/coraza/v3/internal/corazarules"
 	"github.com/corazawaf/coraza/v3/internal/environment"
@@ -2102,6 +2103,413 @@ func TestAddGetArgsWithOverlimit(t *testing.T) {
 	}
 }
 
+// TestExtractGetArgumentsDeterministicTruncation asserts that when the query
+// string holds more distinct keys than SecArgumentsLimit, the same keys
+// survive on every run: arguments are consumed in document order rather than
+// Go map order, the trailing ones are dropped instead of stored, and
+// REQBODY_ERROR reports the cut.
+func TestExtractGetArgumentsDeterministicTruncation(t *testing.T) {
+	const uri = "evil=%3Cscript%3E&a=1&b=2&c=3&d=4"
+	for i := 0; i < 50; i++ {
+		waf := NewWAF()
+		waf.ArgumentLimit = 2
+		tx := waf.NewTransaction()
+		tx.ExtractGetArguments(uri)
+		if want, have := 1, len(tx.variables.argsGet.Get("evil")); want != have {
+			t.Fatalf("run %d: 'evil' not kept in document order, want %d value, have %d", i, want, have)
+		}
+		if want, have := 1, len(tx.variables.argsGet.Get("a")); want != have {
+			t.Fatalf("run %d: 'a' not kept in document order, want %d value, have %d", i, want, have)
+		}
+		if want, have := waf.ArgumentLimit, tx.variables.argsGet.Len(); want != have {
+			t.Fatalf("run %d: ARGS_GET must hold exactly the limit, want %d values, have %d", i, want, have)
+		}
+		for _, dropped := range []string{"b", "c", "d"} {
+			if have := tx.variables.argsGet.Get(dropped); len(have) != 0 {
+				t.Fatalf("run %d: %q is past the limit and must not be stored, have %v", i, dropped, have)
+			}
+		}
+		if want, have := "1", tx.variables.reqbodyError.Get(); want != have {
+			t.Fatalf("run %d: unexpected REQBODY_ERROR, want %q, have %q", i, want, have)
+		}
+		if want, have := argumentsLimitErrorMsg, tx.variables.reqbodyErrorMsg.Get(); want != have {
+			t.Fatalf("run %d: unexpected REQBODY_ERROR_MSG, want %q, have %q", i, want, have)
+		}
+		if err := tx.Close(); err != nil {
+			t.Fatalf("Failed to close transaction: %s", err.Error())
+		}
+	}
+}
+
+// TestArgumentsLimitCountsRepeatedKeys asserts that every value counts against
+// SecArgumentsLimit, not every distinct name. ModSecurity counts one argument
+// table entry per key=value pair, so a query string that stores all its values
+// under a single name is capped like any other.
+func TestArgumentsLimitCountsRepeatedKeys(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		fill func(tx *Transaction, values int)
+		get  func(tx *Transaction) []string
+	}{
+		{
+			name: "extract_get",
+			fill: func(tx *Transaction, values int) {
+				pairs := make([]string, 0, values)
+				for i := 0; i < values; i++ {
+					pairs = append(pairs, fmt.Sprintf("a=%d", i))
+				}
+				tx.ExtractGetArguments(strings.Join(pairs, "&"))
+			},
+			get: func(tx *Transaction) []string { return tx.variables.argsGet.Get("a") },
+		},
+		{
+			name: "add_get",
+			fill: func(tx *Transaction, values int) {
+				for i := 0; i < values; i++ {
+					tx.AddGetRequestArgument("a", strconv.Itoa(i))
+				}
+			},
+			get: func(tx *Transaction) []string { return tx.variables.argsGet.Get("a") },
+		},
+		{
+			name: "add_post",
+			fill: func(tx *Transaction, values int) {
+				for i := 0; i < values; i++ {
+					tx.AddPostRequestArgument("a", strconv.Itoa(i))
+				}
+			},
+			get: func(tx *Transaction) []string { return tx.variables.argsPost.Get("a") },
+		},
+		{
+			name: "add_path",
+			fill: func(tx *Transaction, values int) {
+				for i := 0; i < values; i++ {
+					tx.AddPathRequestArgument("a", strconv.Itoa(i))
+				}
+			},
+			get: func(tx *Transaction) []string { return tx.variables.argsPath.Get("a") },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			waf := NewWAF()
+			waf.ArgumentLimit = 3
+			tx := waf.NewTransaction()
+			tc.fill(tx, 10)
+			if want, have := waf.ArgumentLimit, len(tc.get(tx)); want != have {
+				t.Errorf("repeated key stored past the limit, want %d values, have %d", want, have)
+			}
+			if want, have := "1", tx.variables.reqbodyError.Get(); want != have {
+				t.Errorf("unexpected REQBODY_ERROR, want %q, have %q", want, have)
+			}
+			if want, have := argumentsLimitErrorMsg, tx.variables.reqbodyErrorMsg.Get(); want != have {
+				t.Errorf("unexpected REQBODY_ERROR_MSG, want %q, have %q", want, have)
+			}
+			if err := tx.Close(); err != nil {
+				t.Fatalf("Failed to close transaction: %s", err.Error())
+			}
+		})
+	}
+
+	t.Run("add_response", func(t *testing.T) {
+		waf := NewWAF()
+		waf.ArgumentLimit = 3
+		tx := waf.NewTransaction()
+		for i := 0; i < 10; i++ {
+			tx.AddResponseArgument("a", strconv.Itoa(i))
+		}
+		if want, have := waf.ArgumentLimit, len(tx.variables.responseArgs.Get("a")); want != have {
+			t.Errorf("repeated key stored past the limit, want %d values, have %d", want, have)
+		}
+		if want, have := "1", tx.variables.resBodyError.Get(); want != have {
+			t.Errorf("unexpected RES_BODY_ERROR, want %q, have %q", want, have)
+		}
+		if want, have := argumentsLimitErrorMsg, tx.variables.resBodyErrorMsg.Get(); want != have {
+			t.Errorf("unexpected RES_BODY_ERROR_MSG, want %q, have %q", want, have)
+		}
+		if err := tx.Close(); err != nil {
+			t.Fatalf("Failed to close transaction: %s", err.Error())
+		}
+	})
+}
+
+// queryString builds a url encoded query string holding keys distinct keys.
+func queryString(keys int) string {
+	pairs := make([]string, 0, keys)
+	for i := 0; i < keys; i++ {
+		pairs = append(pairs, fmt.Sprintf("k%d=v", i))
+	}
+	return strings.Join(pairs, "&")
+}
+
+// TestArgumentsLimitRaisesReqbodyError asserts that dropping arguments at
+// SecArgumentsLimit raises the body error flag and message in every collection
+// that caps, with the message ModSecurity reports. The dropped arguments are
+// the attacker-chosen tail, so the truncation has to be visible to the rules
+// and not only to the debug log. RESPONSE_ARGS is filled while the response is
+// processed, so it reports through RES_BODY_ERROR; every other collection
+// reports through REQBODY_ERROR.
+func TestArgumentsLimitRaisesReqbodyError(t *testing.T) {
+	// Spelled out once: this is the text ModSecurity emits, and a ruleset
+	// matching on it verbatim breaks if it drifts.
+	if want, have := "SecArgumentsLimit exceeded", argumentsLimitErrorMsg; want != have {
+		t.Fatalf("the message no longer matches ModSecurity, want %q, have %q", want, have)
+	}
+	for _, tc := range []struct {
+		name         string
+		responseSide bool
+		fill         func(tx *Transaction, keys int)
+	}{
+		{
+			name: "extract_get",
+			fill: func(tx *Transaction, keys int) {
+				tx.ExtractGetArguments(queryString(keys))
+			},
+		},
+		{
+			name: "process_uri",
+			fill: func(tx *Transaction, keys int) {
+				tx.ProcessURI("/?"+queryString(keys), "GET", "HTTP/1.1")
+			},
+		},
+		{
+			name: "add_get",
+			fill: func(tx *Transaction, keys int) {
+				for i := 0; i < keys; i++ {
+					tx.AddGetRequestArgument(fmt.Sprintf("k%d", i), "v")
+				}
+			},
+		},
+		{
+			name: "add_path",
+			fill: func(tx *Transaction, keys int) {
+				for i := 0; i < keys; i++ {
+					tx.AddPathRequestArgument(fmt.Sprintf("k%d", i), "v")
+				}
+			},
+		},
+		{
+			name: "add_post",
+			fill: func(tx *Transaction, keys int) {
+				for i := 0; i < keys; i++ {
+					tx.AddPostRequestArgument(fmt.Sprintf("k%d", i), "v")
+				}
+			},
+		},
+		{
+			name:         "add_response",
+			responseSide: true,
+			fill: func(tx *Transaction, keys int) {
+				for i := 0; i < keys; i++ {
+					tx.AddResponseArgument(fmt.Sprintf("k%d", i), "v")
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, c := range []struct {
+				keys    int
+				want    string
+				wantMsg string
+			}{
+				{keys: 3, want: "0", wantMsg: ""},
+				{keys: 4, want: "1", wantMsg: argumentsLimitErrorMsg},
+			} {
+				waf := NewWAF()
+				waf.ArgumentLimit = 3
+				tx := waf.NewTransaction()
+				tc.fill(tx, c.keys)
+
+				flagName, msgName := "REQBODY_ERROR", "REQBODY_ERROR_MSG"
+				flag, msg := tx.variables.reqbodyError, tx.variables.reqbodyErrorMsg
+				quiet, quietName := tx.variables.resBodyError, "RES_BODY_ERROR"
+				if tc.responseSide {
+					flagName, msgName = "RES_BODY_ERROR", "RES_BODY_ERROR_MSG"
+					flag, msg = tx.variables.resBodyError, tx.variables.resBodyErrorMsg
+					quiet, quietName = tx.variables.reqbodyError, "REQBODY_ERROR"
+				}
+				if have := flag.Get(); c.want != have {
+					t.Errorf("%d keys under a limit of 3: unexpected %s, want %q, have %q", c.keys, flagName, c.want, have)
+				}
+				if have := msg.Get(); c.wantMsg != have {
+					t.Errorf("%d keys under a limit of 3: unexpected %s, want %q, have %q", c.keys, msgName, c.wantMsg, have)
+				}
+				// The two sides report independently: a cap on one must not
+				// make a rule on the other match.
+				if want, have := "0", quiet.Get(); want != have {
+					t.Errorf("%d keys under a limit of 3: truncation must not touch %s, want %q, have %q", c.keys, quietName, want, have)
+				}
+				if err := tx.Close(); err != nil {
+					t.Fatalf("Failed to close transaction: %s", err.Error())
+				}
+			}
+		})
+	}
+}
+
+// TestBodylessRequestOverArgumentsLimitRaisesReqbodyError asserts that a
+// request carrying no body at all raises REQBODY_ERROR once its query string
+// alone passes SecArgumentsLimit. The query string caps the same way a body
+// does and reports through the same variables, as ModSecurity does, so a
+// ruleset written against REQBODY_ERROR sees query-string truncation too.
+func TestBodylessRequestOverArgumentsLimitRaisesReqbodyError(t *testing.T) {
+	waf := NewWAF()
+	waf.ArgumentLimit = 3
+	tx := waf.NewTransaction()
+	tx.ProcessURI("/?"+queryString(4), "GET", "HTTP/1.1")
+	tx.ProcessRequestHeaders()
+	if _, err := tx.ProcessRequestBody(); err != nil {
+		t.Fatal(err)
+	}
+	if want, have := "1", tx.variables.reqbodyError.Get(); want != have {
+		t.Errorf("unexpected REQBODY_ERROR, want %q, have %q", want, have)
+	}
+	if want, have := argumentsLimitErrorMsg, tx.variables.reqbodyErrorMsg.Get(); want != have {
+		t.Errorf("unexpected REQBODY_ERROR_MSG, want %q, have %q", want, have)
+	}
+	if err := tx.Close(); err != nil {
+		t.Fatalf("Failed to close transaction: %s", err.Error())
+	}
+}
+
+// TestArgumentsLimitKeepsFirstBodyErrorMessage asserts that an argument limit
+// trip leaves a message a parse failure already set alone, so the more
+// specific diagnosis is the one an operator reads.
+func TestArgumentsLimitKeepsFirstBodyErrorMessage(t *testing.T) {
+	waf := NewWAF()
+	waf.RequestBodyAccess = true
+	waf.ArgumentLimit = 2
+	tx := waf.NewTransaction()
+	tx.AddRequestHeader("content-type", "application/xml")
+	tx.ProcessRequestHeaders()
+	tx.variables.reqbodyProcessor.Set("XML")
+	if _, err := tx.requestBodyBuffer.Write([]byte("<root><1a/></root>")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ProcessRequestBody(); err != nil {
+		t.Fatal(err)
+	}
+	want := tx.variables.reqbodyErrorMsg.Get()
+	if want == "" || strings.Contains(want, argumentsLimitErrorMsg) {
+		t.Fatalf("the malformed body did not report a parse failure, REQBODY_ERROR_MSG is %q", want)
+	}
+
+	for i := 0; i <= waf.ArgumentLimit; i++ {
+		tx.AddPostRequestArgument(fmt.Sprintf("k%d", i), "v")
+	}
+	if have := tx.variables.reqbodyErrorMsg.Get(); want != have {
+		t.Errorf("the argument limit overwrote the parse failure message, want %q, have %q", want, have)
+	}
+	if err := tx.Close(); err != nil {
+		t.Fatalf("Failed to close transaction: %s", err.Error())
+	}
+}
+
+// TestBodyErrorMessageFollowsTheLatestParseFailure asserts that a parse failure
+// replaces a message an argument limit trip already set. The write-once guard
+// is deliberately one-directional, as in ModSecurity, where it lives inside
+// add_argument() alone: a truncation notice gives way to the parser's own
+// diagnosis, while the reverse order keeps the parse failure.
+func TestBodyErrorMessageFollowsTheLatestParseFailure(t *testing.T) {
+	waf := NewWAF()
+	waf.RequestBodyAccess = true
+	waf.ArgumentLimit = 2
+	tx := waf.NewTransaction()
+	tx.ProcessURI("/?a=1&b=2&c=3", "GET", "HTTP/1.1")
+	if want, have := argumentsLimitErrorMsg, tx.variables.reqbodyErrorMsg.Get(); want != have {
+		t.Fatalf("the query string did not trip the limit, REQBODY_ERROR_MSG is %q, want %q", have, want)
+	}
+
+	tx.AddRequestHeader("content-type", "application/xml")
+	tx.ProcessRequestHeaders()
+	tx.variables.reqbodyProcessor.Set("XML")
+	if _, err := tx.requestBodyBuffer.Write([]byte("<root><1a/></root>")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ProcessRequestBody(); err != nil {
+		t.Fatal(err)
+	}
+	have := tx.variables.reqbodyErrorMsg.Get()
+	if have == "" || strings.Contains(have, argumentsLimitErrorMsg) {
+		t.Errorf("the parse failure did not replace the truncation notice, REQBODY_ERROR_MSG is %q", have)
+	}
+	if err := tx.Close(); err != nil {
+		t.Fatalf("Failed to close transaction: %s", err.Error())
+	}
+}
+
+// TestResponseBodyErrorVariablesAreAddressable asserts that the RES_BODY_ERROR
+// family resolves to the collection that holds it. An unmapped variable falls
+// back to the noop collection, so a rule written against it compiles and then
+// never matches whatever the response path raised.
+func TestResponseBodyErrorVariablesAreAddressable(t *testing.T) {
+	waf := NewWAF()
+	tx := waf.NewTransaction()
+	for _, tc := range []struct {
+		variable variables.RuleVariable
+		holder   *collections.Single
+	}{
+		{variables.ResBodyError, tx.variables.resBodyError},
+		{variables.ResBodyErrorMsg, tx.variables.resBodyErrorMsg},
+		{variables.ResBodyProcessorError, tx.variables.resBodyProcessorError},
+		{variables.ResBodyProcessorErrorMsg, tx.variables.resBodyProcessorErrorMsg},
+	} {
+		// The value is the variable's own name, so resolving to a sibling of
+		// the right shape is a mismatch rather than a coincidence.
+		want := tc.variable.Name()
+		tc.holder.Set(want)
+		var have []string
+		for _, md := range tx.Collection(tc.variable).FindAll() {
+			have = append(have, md.Value())
+		}
+		if len(have) != 1 || have[0] != want {
+			t.Errorf("a rule on %s cannot see what the response path raised, want [%q], have %q", tc.variable.Name(), want, have)
+		}
+	}
+	if err := tx.Close(); err != nil {
+		t.Fatalf("Failed to close transaction: %s", err.Error())
+	}
+}
+
+// TestResponseBodyErrorVariablesSeeded asserts that a fresh transaction reads
+// "0" from the RES_BODY_ERROR flags, so a rule written as
+// `SecRule RES_BODY_ERROR "!@eq 0"` compares against a number on a clean
+// response instead of an empty string, as it does on the request side.
+func TestResponseBodyErrorVariablesSeeded(t *testing.T) {
+	waf := NewWAF()
+	tx := waf.NewTransaction()
+	for _, v := range []struct {
+		name string
+		have string
+	}{
+		{"RES_BODY_ERROR", tx.variables.resBodyError.Get()},
+		{"RES_BODY_PROCESSOR_ERROR", tx.variables.resBodyProcessorError.Get()},
+	} {
+		if want := "0"; want != v.have {
+			t.Errorf("unexpected %s on a clean response, want %q, have %q", v.name, want, v.have)
+		}
+	}
+	if err := tx.Close(); err != nil {
+		t.Fatalf("Failed to close transaction: %s", err.Error())
+	}
+}
+
+// TestResponseBodyErrorVariablesMinPhase asserts that the RES_BODY_ERROR family
+// is known to be populated in the response body phase. A variable with no phase
+// makes a chained rule using it evaluate in every phase, where the flags still
+// hold their seeded "0".
+func TestResponseBodyErrorVariablesMinPhase(t *testing.T) {
+	for _, v := range []variables.RuleVariable{
+		variables.ResBodyError,
+		variables.ResBodyErrorMsg,
+		variables.ResBodyProcessorError,
+		variables.ResBodyProcessorErrorMsg,
+	} {
+		if want, have := types.PhaseResponseBody, minPhase(v); want != have {
+			t.Errorf("unexpected min phase for %s, want %d, have %d", v.Name(), want, have)
+		}
+	}
+}
+
 func TestAddPostArgsWithOverlimit(t *testing.T) {
 	testCases := []int{1, 2, 5, 1000}
 
@@ -2159,6 +2567,312 @@ func TestAddResponseArgsWithOverlimit(t *testing.T) {
 		if err := tx.Close(); err != nil {
 			t.Fatalf("Failed to close transaction: %s", err.Error())
 		}
+	}
+}
+
+func oversizedJSONBody(members int) string {
+	body := strings.Builder{}
+	body.WriteString("{")
+	for i := 0; i < members; i++ {
+		if i > 0 {
+			body.WriteString(",")
+		}
+		fmt.Fprintf(&body, `"k%d":"v"`, i)
+	}
+	body.WriteString("}")
+	return body.String()
+}
+
+// TestProcessRequestBodyArgumentsLimit asserts that a body holding more members
+// than SecArgumentsLimit raises REQBODY_ERROR and names SecArgumentsLimit in
+// REQBODY_ERROR_MSG, whichever processor parsed it, and leaves the
+// REQBODY_PROCESSOR_ERROR family untouched: the processor itself did not fail.
+// The collection keeps exactly SecArgumentsLimit members, so what fits under
+// the limit stays available to the rules.
+func TestProcessRequestBodyArgumentsLimit(t *testing.T) {
+	const members = 50
+
+	for _, tc := range []struct {
+		name        string
+		processor   string
+		contentType string
+		body        string
+		count       func(tx *Transaction) int
+	}{
+		{
+			name:        "json",
+			processor:   "JSON",
+			contentType: "application/json",
+			body:        oversizedJSONBody(members),
+			count:       func(tx *Transaction) int { return tx.variables.argsPost.Len() },
+		},
+		{
+			name:        "urlencoded",
+			processor:   "URLENCODED",
+			contentType: "application/x-www-form-urlencoded",
+			body: func() string {
+				pairs := make([]string, 0, members)
+				for i := 0; i < members; i++ {
+					pairs = append(pairs, fmt.Sprintf("k%d=v", i))
+				}
+				return strings.Join(pairs, "&")
+			}(),
+			count: func(tx *Transaction) int { return tx.variables.argsPost.Len() },
+		},
+		{
+			// REQUEST_XML is budgeted at MaxNodesPerArgument members per unit of
+			// SecArgumentsLimit, so the body carries that many attributes per
+			// member and the count is converted back into those units.
+			name:        "xml",
+			processor:   "XML",
+			contentType: "application/xml",
+			body: func() string {
+				var b strings.Builder
+				b.WriteString("<root>")
+				for i := 0; i < members*bodyprocessors.MaxNodesPerArgument; i++ {
+					fmt.Fprintf(&b, `<e a="v%d"/>`, i)
+				}
+				b.WriteString("</root>")
+				return b.String()
+			}(),
+			count: func(tx *Transaction) int {
+				return len(tx.variables.requestXML.FindAll()) / bodyprocessors.MaxNodesPerArgument
+			},
+		},
+		{
+			name:        "multipart",
+			processor:   "MULTIPART",
+			contentType: "multipart/form-data; boundary=X",
+			body: func() string {
+				var b strings.Builder
+				for i := 0; i < members; i++ {
+					fmt.Fprintf(&b, "--X\r\nContent-Disposition: form-data; name=\"k%d\"\r\n\r\nv\r\n", i)
+				}
+				b.WriteString("--X--\r\n")
+				return b.String()
+			}(),
+			count: func(tx *Transaction) int { return tx.variables.argsPost.Len() },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			waf := NewWAF()
+			waf.RequestBodyAccess = true
+			waf.ArgumentLimit = 10
+			tx := waf.NewTransaction()
+			tx.AddRequestHeader("content-type", tc.contentType)
+			tx.ProcessRequestHeaders()
+			tx.variables.reqbodyProcessor.Set(tc.processor)
+			if _, err := tx.requestBodyBuffer.Write([]byte(tc.body)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tx.ProcessRequestBody(); err != nil {
+				t.Fatal(err)
+			}
+			if want, have := "1", tx.variables.reqbodyError.Get(); want != have {
+				t.Errorf("unexpected REQBODY_ERROR, want %q, have %q", want, have)
+			}
+			if want, have := argumentsLimitErrorMsg, tx.variables.reqbodyErrorMsg.Get(); want != have {
+				t.Errorf("unexpected REQBODY_ERROR_MSG, want %q, have %q", want, have)
+			}
+			for _, v := range []struct {
+				name string
+				have string
+			}{
+				{"REQBODY_PROCESSOR_ERROR", tx.variables.reqbodyProcessorError.Get()},
+				{"REQBODY_PROCESSOR_ERROR_MSG", tx.variables.reqbodyProcessorErrorMsg.Get()},
+			} {
+				if v.have != "" && v.have != "0" {
+					t.Errorf("a count trip must not fail the body processor, %s is %q", v.name, v.have)
+				}
+			}
+			if want, have := waf.ArgumentLimit, tc.count(tx); want != have {
+				t.Errorf("truncation must fill the collection to the limit and stop, want %d members, have %d", want, have)
+			}
+			if err := tx.Close(); err != nil {
+				t.Fatalf("Failed to close transaction: %s", err.Error())
+			}
+		})
+	}
+}
+
+// TestProcessRequestBodyJSONDecodedSizeIsFatal asserts that the JSON
+// decoded-bytes budget stays fail-closed: a body that inflates far beyond its
+// own size raises REQBODY_ERROR and names the budget in REQBODY_ERROR_MSG
+// rather than pointing at SecArgumentsLimit, which does not govern it.
+func TestProcessRequestBodyJSONDecodedSizeIsFatal(t *testing.T) {
+	var body strings.Builder
+	pad := strings.Repeat("A", 1000)
+	const levels = 900
+	for i := 0; i < levels; i++ {
+		fmt.Fprintf(&body, `{"z":1,"%s":`, pad)
+	}
+	body.WriteString("1")
+	body.WriteString(strings.Repeat("}", levels))
+
+	waf := NewWAF()
+	waf.RequestBodyAccess = true
+	tx := waf.NewTransaction()
+	tx.AddRequestHeader("content-type", "application/json")
+	tx.ProcessRequestHeaders()
+	tx.variables.reqbodyProcessor.Set("JSON")
+	if _, err := tx.requestBodyBuffer.Write([]byte(body.String())); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ProcessRequestBody(); err != nil {
+		t.Fatal(err)
+	}
+	if want, have := "1", tx.variables.reqbodyError.Get(); want != have {
+		t.Errorf("unexpected REQBODY_ERROR, want %q, have %q", want, have)
+	}
+	if have := tx.variables.reqbodyErrorMsg.Get(); !strings.Contains(have, "json decoded size limit exceeded") {
+		t.Errorf("REQBODY_ERROR_MSG does not name the budget that tripped, have %q", have)
+	}
+	if err := tx.Close(); err != nil {
+		t.Fatalf("Failed to close transaction: %s", err.Error())
+	}
+}
+
+// TestProcessResponseBodyArgumentsLimit asserts that a response body holding
+// more members than SecArgumentsLimit raises RES_BODY_ERROR and names
+// SecArgumentsLimit in RES_BODY_ERROR_MSG, and leaves the
+// RES_BODY_PROCESSOR_ERROR family untouched: the processor itself did not
+// fail. The collection keeps exactly SecArgumentsLimit members, so what fits
+// under the limit stays available to the rules.
+func TestProcessResponseBodyArgumentsLimit(t *testing.T) {
+	const members = 50
+
+	for _, tc := range []struct {
+		name      string
+		processor string
+		body      string
+		count     func(tx *Transaction) int
+	}{
+		{
+			name:      "json",
+			processor: "JSON",
+			body:      oversizedJSONBody(members),
+			count:     func(tx *Transaction) int { return tx.variables.responseArgs.Len() },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			waf := NewWAF()
+			waf.ResponseBodyAccess = true
+			waf.ArgumentLimit = 10
+			tx := waf.NewTransaction()
+			tx.ForceResponseBodyVariable = true
+			tx.variables.ResponseBodyProcessor().(*collections.Single).Set(tc.processor)
+			tx.ProcessRequestHeaders()
+			if _, err := tx.ProcessRequestBody(); err != nil {
+				t.Fatal(err)
+			}
+			tx.ProcessResponseHeaders(200, "HTTP/1.1")
+			if _, _, err := tx.WriteResponseBody([]byte(tc.body)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tx.ProcessResponseBody(); err != nil {
+				t.Fatal(err)
+			}
+			if want, have := "1", tx.variables.resBodyError.Get(); want != have {
+				t.Errorf("unexpected RES_BODY_ERROR, want %q, have %q", want, have)
+			}
+			if want, have := argumentsLimitErrorMsg, tx.variables.resBodyErrorMsg.Get(); want != have {
+				t.Errorf("unexpected RES_BODY_ERROR_MSG, want %q, have %q", want, have)
+			}
+			for _, v := range []struct {
+				name string
+				have string
+			}{
+				{"RES_BODY_PROCESSOR_ERROR", tx.variables.resBodyProcessorError.Get()},
+				{"RES_BODY_PROCESSOR_ERROR_MSG", tx.variables.resBodyProcessorErrorMsg.Get()},
+			} {
+				if v.have != "" && v.have != "0" {
+					t.Errorf("a count trip must not fail the body processor, %s is %q", v.name, v.have)
+				}
+			}
+			if want, have := waf.ArgumentLimit, tc.count(tx); want != have {
+				t.Errorf("truncation must fill the collection to the limit and stop, want %d members, have %d", want, have)
+			}
+			if err := tx.Close(); err != nil {
+				t.Fatalf("Failed to close transaction: %s", err.Error())
+			}
+		})
+	}
+}
+
+// TestProcessResponseBodyJSONDecodedSizeIsFatal asserts that the JSON
+// decoded-bytes budget stays fail-closed on the response path: a body that
+// inflates far beyond its own size raises RES_BODY_ERROR and names the budget
+// in RES_BODY_ERROR_MSG, unlike a plain SecArgumentsLimit count trip.
+func TestProcessResponseBodyJSONDecodedSizeIsFatal(t *testing.T) {
+	var body strings.Builder
+	pad := strings.Repeat("A", 300)
+	const levels = 900
+	for i := 0; i < levels; i++ {
+		fmt.Fprintf(&body, `{"z":1,"%s":`, pad)
+	}
+	body.WriteString("1")
+	body.WriteString(strings.Repeat("}", levels))
+
+	waf := NewWAF()
+	waf.ResponseBodyAccess = true
+	waf.ResponseBodyLimit = int64(body.Len())
+	tx := waf.NewTransaction()
+	tx.ForceResponseBodyVariable = true
+	tx.variables.ResponseBodyProcessor().(*collections.Single).Set("JSON")
+	tx.ProcessRequestHeaders()
+	if _, err := tx.ProcessRequestBody(); err != nil {
+		t.Fatal(err)
+	}
+	tx.ProcessResponseHeaders(200, "HTTP/1.1")
+	if _, _, err := tx.WriteResponseBody([]byte(body.String())); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ProcessResponseBody(); err != nil {
+		t.Fatal(err)
+	}
+	if want, have := "1", tx.variables.resBodyError.Get(); want != have {
+		t.Errorf("unexpected RES_BODY_ERROR, want %q, have %q", want, have)
+	}
+	if have := tx.variables.resBodyErrorMsg.Get(); !strings.Contains(have, "json decoded size limit exceeded") {
+		t.Errorf("RES_BODY_ERROR_MSG does not name the budget that tripped, have %q", have)
+	}
+	if err := tx.Close(); err != nil {
+		t.Fatalf("Failed to close transaction: %s", err.Error())
+	}
+}
+
+// TestProcessResponseBodyJSONDepthLimit asserts that SecRequestBodyJsonDepthLimit
+// reaches the response body processor: a response nested past the configured
+// depth raises RES_BODY_ERROR and names the recursion failure, rather than
+// parsing to an unbounded depth.
+func TestProcessResponseBodyJSONDepthLimit(t *testing.T) {
+	body := strings.Repeat("[", 200) + strings.Repeat("]", 200)
+
+	waf := NewWAF()
+	waf.ResponseBodyAccess = true
+	waf.RequestBodyJsonDepthLimit = 100
+	tx := waf.NewTransaction()
+	tx.ForceResponseBodyVariable = true
+	tx.variables.ResponseBodyProcessor().(*collections.Single).Set("JSON")
+	tx.ProcessRequestHeaders()
+	if _, err := tx.ProcessRequestBody(); err != nil {
+		t.Fatal(err)
+	}
+	tx.ProcessResponseHeaders(200, "HTTP/1.1")
+	if _, _, err := tx.WriteResponseBody([]byte(body)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ProcessResponseBody(); err != nil {
+		t.Fatal(err)
+	}
+	if want, have := "1", tx.variables.resBodyError.Get(); want != have {
+		t.Errorf("unexpected RES_BODY_ERROR, want %q, have %q", want, have)
+	}
+	if have := tx.variables.resBodyErrorMsg.Get(); !strings.Contains(have, "max recursion reached") {
+		t.Errorf("RES_BODY_ERROR_MSG does not name the recursion failure, have %q", have)
+	}
+	if err := tx.Close(); err != nil {
+		t.Fatalf("Failed to close transaction: %s", err.Error())
 	}
 }
 
@@ -2662,4 +3376,105 @@ func BenchmarkRuleEvalWithRemovedRules(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		waf.Rules.Eval(types.PhaseRequestHeaders, tx)
 	}
+}
+
+// TestBodyLimitsDoNotLogAtErrorLevel asserts that no limit a client can trip
+// with a syntactically valid body produces an error-level log line. Error is
+// reserved for bodies the parser could not read, so a client cannot flood the
+// log by sending large well-formed input.
+func TestBodyLimitsDoNotLogAtErrorLevel(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		tune func(*WAF)
+		body string
+	}{
+		{
+			name: "arguments_limit",
+			tune: func(w *WAF) { w.ArgumentLimit = 10 },
+			body: `{"a":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]}`,
+		},
+		{
+			name: "json_recursion_limit",
+			tune: func(w *WAF) { w.RequestBodyJsonDepthLimit = 20 },
+			body: strings.Repeat(`{"a":`, 40) + "1" + strings.Repeat("}", 40),
+		},
+		{
+			name: "json_decoded_size_limit",
+			tune: func(w *WAF) { w.ArgumentLimit = 1000000 },
+			body: deepWideJSONBody(200, 400),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var debugLog strings.Builder
+			waf := NewWAF()
+			waf.RequestBodyAccess = true
+			tc.tune(waf)
+			tx := waf.NewTransaction()
+			tx.debugLogger = debuglog.Default().WithLevel(debuglog.LevelDebug).WithOutput(&debugLog)
+			tx.AddRequestHeader("content-type", "application/json")
+			tx.ProcessRequestHeaders()
+			tx.variables.reqbodyProcessor.Set("JSON")
+			if _, err := tx.requestBodyBuffer.Write([]byte(tc.body)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tx.ProcessRequestBody(); err != nil {
+				t.Fatal(err)
+			}
+			// Each body must actually trip its limit, or the assertion below is
+			// vacuous.
+			if want, have := "1", tx.variables.reqbodyError.Get(); want != have {
+				t.Fatalf("the body did not trip the limit, REQBODY_ERROR is %q", have)
+			}
+			if strings.Contains(debugLog.String(), "[ERROR]") {
+				t.Errorf("a client-triggerable limit logged at error level:\n%s", debugLog.String())
+			}
+		})
+
+		t.Run(tc.name+"_response", func(t *testing.T) {
+			var debugLog strings.Builder
+			waf := NewWAF()
+			waf.ResponseBodyAccess = true
+			tc.tune(waf)
+			tx := waf.NewTransaction()
+			tx.debugLogger = debuglog.Default().WithLevel(debuglog.LevelDebug).WithOutput(&debugLog)
+			tx.ForceResponseBodyVariable = true
+			tx.variables.ResponseBodyProcessor().(*collections.Single).Set("JSON")
+			tx.ProcessRequestHeaders()
+			if _, err := tx.ProcessRequestBody(); err != nil {
+				t.Fatal(err)
+			}
+			tx.ProcessResponseHeaders(200, "HTTP/1.1")
+			if _, _, err := tx.WriteResponseBody([]byte(tc.body)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tx.ProcessResponseBody(); err != nil {
+				t.Fatal(err)
+			}
+			if want, have := "1", tx.variables.resBodyError.Get(); want != have {
+				t.Fatalf("the body did not trip the limit, RES_BODY_ERROR is %q", have)
+			}
+			if strings.Contains(debugLog.String(), "[ERROR]") {
+				t.Errorf("a client-triggerable limit logged at error level:\n%s", debugLog.String())
+			}
+		})
+	}
+}
+
+// deepWideJSONBody builds a body that nests to levels and then fans out into
+// leaves, so every flattened path shares one long prefix.
+func deepWideJSONBody(levels, leaves int) string {
+	b := strings.Builder{}
+	for i := 0; i < levels; i++ {
+		fmt.Fprintf(&b, `{"nesting_level_%d":`, i)
+	}
+	b.WriteString("{")
+	for i := 0; i < leaves; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		fmt.Fprintf(&b, `"leaf_%d":"%s"`, i, strings.Repeat("v", 200))
+	}
+	b.WriteString("}")
+	b.WriteString(strings.Repeat("}", levels))
+	return b.String()
 }

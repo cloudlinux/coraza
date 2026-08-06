@@ -276,6 +276,8 @@ func (w *WAF) newTransaction(opts Options) *Transaction {
 	tx.variables.outboundDataError.Set("0")
 	tx.variables.reqbodyError.Set("0")
 	tx.variables.reqbodyProcessorError.Set("0")
+	tx.variables.resBodyError.Set("0")
+	tx.variables.resBodyProcessorError.Set("0")
 	tx.variables.requestBodyLength.Set("0")
 	tx.variables.duration.Set("0")
 	tx.variables.highestSeverity.Set(strconv.Itoa(defaultHighestSeverity))

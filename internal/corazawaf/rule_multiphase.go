@@ -126,6 +126,8 @@ func minPhase(v variables.RuleVariable) types.RulePhase {
 		return types.PhaseRequestHeaders
 	case variables.RequestURIRaw:
 		return types.PhaseRequestHeaders
+	case variables.ResBodyError, variables.ResBodyErrorMsg, variables.ResBodyProcessorError, variables.ResBodyProcessorErrorMsg:
+		return types.PhaseResponseBody
 	case variables.ResponseBody:
 		return types.PhaseResponseBody
 	case variables.ResponseContentLength:

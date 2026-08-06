@@ -5,10 +5,12 @@ package testing
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/corazawaf/coraza/v3"
+	"github.com/corazawaf/coraza/v3/types"
 )
 
 func TestRawRequests(t *testing.T) {
@@ -100,4 +102,68 @@ func buildRequest(method, uri string) string {
 		method + " " + uri + " HTTP/1.1",
 		"Host: www.example.com",
 	}, "\r\n")
+}
+
+// TestRecommendedConfArgumentsLimit asserts that the REQBODY_ERROR rule
+// shipped in coraza.conf-recommended denies a request whose arguments were
+// only inspected in part, with the status the file declares, and stays quiet
+// on a request that fits under SecArgumentsLimit. The file is read from disk
+// so the rule that ships is the rule under test.
+func TestRecommendedConfArgumentsLimit(t *testing.T) {
+	const argumentsLimitRuleID = 200002
+
+	rec, err := os.ReadFile("../coraza.conf-recommended")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The file ships in DetectionOnly so that dropping it into a deployment
+	// cannot break traffic; blocking is what the rule is asserted on here.
+	waf, err := coraza.NewWAF(coraza.NewWAFConfig().
+		WithDirectives(string(rec)).
+		WithDirectives("SecRuleEngine On\nSecArgumentsLimit 5"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		uri  string
+		want *types.Interruption
+	}{
+		{
+			name: "over the limit",
+			uri:  "/?a=1&b=2&c=3&d=4&e=5&f=6&evil=1",
+			want: &types.Interruption{RuleID: argumentsLimitRuleID, Status: 400, Action: "deny"},
+		},
+		{
+			name: "under the limit",
+			uri:  "/?a=1&b=2&c=3",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tx := waf.NewTransaction()
+			defer func() {
+				if err := tx.Close(); err != nil {
+					t.Fatalf("Failed to close transaction: %s", err.Error())
+				}
+			}()
+			tx.ProcessURI(tc.uri, "GET", "HTTP/1.1")
+			tx.AddRequestHeader("Host", "www.example.com")
+			tx.ProcessRequestHeaders()
+			if _, err := tx.ProcessRequestBody(); err != nil {
+				t.Fatal(err)
+			}
+			have := tx.Interruption()
+			switch {
+			case tc.want == nil:
+				if have != nil {
+					t.Fatalf("a request under SecArgumentsLimit must not be interrupted, have %+v", have)
+				}
+			case have == nil:
+				t.Fatal("a request over SecArgumentsLimit was not interrupted")
+			case have.RuleID != tc.want.RuleID || have.Status != tc.want.Status || have.Action != tc.want.Action:
+				t.Fatalf("unexpected interruption, want %+v, have %+v", tc.want, have)
+			}
+		})
+	}
 }

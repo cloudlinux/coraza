@@ -82,8 +82,8 @@ func TestNamedCollection(t *testing.T) {
 		t.Errorf("want %q, have %q", want, have)
 	}
 
-	if c.Len() != len(c.data) {
-		t.Fatal("The lengths are not equal.")
+	if want, have := len(c.FindAll()), c.Len(); want != have {
+		t.Fatalf("%d values are stored, Len reports %d", want, have)
 	}
 
 }

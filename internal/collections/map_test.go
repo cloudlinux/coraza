@@ -58,8 +58,8 @@ func TestMap(t *testing.T) {
 		}
 	}
 
-	if c.Len() != len(c.data) {
-		t.Fatal("The lengths are not equal.")
+	if want, have := len(c.FindAll()), c.Len(); want != have {
+		t.Fatalf("%d values are stored, Len reports %d", want, have)
 	}
 
 }
@@ -101,8 +101,8 @@ func TestNewCaseSensitiveKeyMap(t *testing.T) {
 		}
 	}
 
-	if c.Len() != len(c.data) {
-		t.Fatal("The lengths are not equal.")
+	if want, have := len(c.FindAll()), c.Len(); want != have {
+		t.Fatalf("%d values are stored, Len reports %d", want, have)
 	}
 
 }
@@ -241,4 +241,36 @@ func BenchmarkTxSetGet(b *testing.B) {
 		}
 	})
 	b.ReportAllocs()
+}
+
+// TestMapLenCountsStoredValues asserts that Len counts stored values, one per
+// key/value pair as ModSecurity counts argument table entries, and that the
+// count stays exact across every mutator. FindAll enumerates the stored values,
+// so it is the oracle Len has to agree with.
+func TestMapLenCountsStoredValues(t *testing.T) {
+	c := NewMap(variables.ArgsGet)
+	for _, step := range []struct {
+		name string
+		op   func()
+	}{
+		{"add", func() { c.Add("a", "1") }},
+		{"add repeated key", func() { c.Add("a", "2") }},
+		{"add another key", func() { c.Add("b", "1") }},
+		{"set replaces with a shorter list", func() { c.Set("a", []string{"x"}) }},
+		{"set replaces with a longer list", func() { c.Set("a", []string{"x", "y", "z"}) }},
+		{"set a new key", func() { c.Set("c", []string{"1", "2"}) }},
+		{"set an empty list", func() { c.Set("c", nil) }},
+		{"set index over an existing value", func() { c.SetIndex("a", 1, "w") }},
+		{"set index past the end appends", func() { c.SetIndex("a", 9, "v") }},
+		{"set index on a new key", func() { c.SetIndex("d", 0, "v") }},
+		{"remove a multi value key", func() { c.Remove("a") }},
+		{"remove a key that is not there", func() { c.Remove("zz") }},
+		{"reset", func() { c.Reset() }},
+		{"add after reset", func() { c.Add("a", "1") }},
+	} {
+		step.op()
+		if want, have := len(c.FindAll()), c.Len(); want != have {
+			t.Fatalf("after %s: %d values are stored, Len reports %d", step.name, want, have)
+		}
+	}
 }
