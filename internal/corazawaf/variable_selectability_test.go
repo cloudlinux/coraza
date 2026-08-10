@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/corazawaf/coraza/v3/collection"
+	"github.com/corazawaf/coraza/v3/internal/collections"
 	"github.com/corazawaf/coraza/v3/types/variables"
 )
 
@@ -55,5 +56,63 @@ func TestCanBeSelectedMatchesKeyedCollection(t *testing.T) {
 	// where the enum ends.
 	if want := int(variables.ScriptUsername); checked != want {
 		t.Errorf("walked %d variables, expected the whole enum through SCRIPT_USERNAME (%d)", checked, want)
+	}
+}
+
+// TestRuleVisibleCollectionsAreReset pins the invariant behind
+// TransactionVariables.All: every collection a rule can reach through
+// Collection() has to be enumerated there, because reset() walks All() and
+// transactions are recycled through a pool.
+//
+// A collection reachable by a rule but missing from All() keeps its value for
+// whichever request gets that transaction next. For an error flag that means a
+// clean request inherits the previous one's failure and is denied by a rule it
+// never tripped, which is why this is worth a structural test rather than a
+// per-variable one: the mistake is invisible at the call site and shows up
+// only under pool reuse.
+//
+// The persistent collections are the deliberate exception - reset() clears
+// them explicitly, and the comment there explains why they stay out of All().
+func TestRuleVisibleCollectionsAreReset(t *testing.T) {
+	waf := NewWAF()
+	tx := waf.NewTransaction()
+	t.Cleanup(func() {
+		if err := tx.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+
+	enumerated := make(map[collection.Collection]struct{})
+	tx.variables.All(func(_ variables.RuleVariable, col collection.Collection) bool {
+		enumerated[col] = struct{}{}
+		return true
+	})
+
+	persistent := map[variables.RuleVariable]struct{}{
+		variables.Global:   {},
+		variables.Resource: {},
+		variables.IP:       {},
+		variables.Session:  {},
+		variables.User:     {},
+	}
+
+	// RuleVariable is a byte; the bound keeps a broken sentinel from looping forever.
+	for i := 1; i < 256; i++ {
+		v := variables.RuleVariable(i)
+		if v.Name() == "INVALID_VARIABLE" {
+			break
+		}
+		if _, skip := persistent[v]; skip {
+			continue
+		}
+		col := tx.Collection(v)
+		// Noop is the fallback for variables no collection backs; nil is JSON,
+		// which Collection() leaves unimplemented.
+		if col == nil || col == collections.Noop {
+			continue
+		}
+		if _, ok := enumerated[col]; !ok {
+			t.Errorf("%s is reachable through Collection() but absent from All(), so it survives Close() and leaks into the next transaction", v.Name())
+		}
 	}
 }

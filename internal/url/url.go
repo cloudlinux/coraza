@@ -7,14 +7,11 @@ import (
 	"strings"
 )
 
-// ParseQuery parses the URL-encoded query string and returns the corresponding map.
-// It takes separators as parameter, for example: & or ; or &;
-func ParseQuery(query string, separator byte) map[string][]string {
-	return doParseQuery(query, separator, true)
-}
-
-func doParseQuery(query string, separator byte, urlUnescape bool) map[string][]string {
-	m := make(map[string][]string)
+// EachQueryValue scans the URL-encoded query string in document order and
+// calls f with each unescaped key/value pair. It takes separators as parameter,
+// for example: & or ; or &;. Scanning stops as soon as f returns false; pairs
+// past that point are never decoded.
+func EachQueryValue(query string, separator byte, f func(key, value string) bool) {
 	for query != "" {
 		key := query
 		if i := strings.IndexByte(key, separator); i >= 0 {
@@ -29,13 +26,12 @@ func doParseQuery(query string, separator byte, urlUnescape bool) map[string][]s
 		if i := strings.IndexByte(key, '='); i >= 0 {
 			key, value = key[:i], key[i+1:]
 		}
-		if urlUnescape {
-			key = queryUnescape(key)
-			value = queryUnescape(value)
+		key = queryUnescape(key)
+		value = queryUnescape(value)
+		if !f(key, value) {
+			return
 		}
-		m[key] = append(m[key], value)
 	}
-	return m
 }
 
 // queryUnescape is a non-strict version of net/url.QueryUnescape.

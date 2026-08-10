@@ -24,7 +24,7 @@ func TestXMLAttribures(t *testing.T) {
 </book>
 
 </bookstore>`
-	attrs, contents, err := readXML(bytes.NewReader([]byte(xmldoc)))
+	attrs, contents, err := readXML(bytes.NewReader([]byte(xmldoc)), 0)
 	if err != nil {
 		t.Error(err)
 	}
@@ -55,7 +55,7 @@ func TestXMLPayloadFlexibility(t *testing.T) {
 			<heading>Reminder</heading>
 			<body>Don't forget me this weekend!
 		</note>`
-	_, contents, err := readXML(bytes.NewReader([]byte(xmldoc)))
+	_, contents, err := readXML(bytes.NewReader([]byte(xmldoc)), 0)
 	if err != nil {
 		t.Error(err)
 	}
@@ -105,7 +105,7 @@ func TestXMLUnexpectedEOF(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.Name, func(t *testing.T) {
 			xmldoc := tc.Input
-			_, contents, err := readXML(bytes.NewReader([]byte(xmldoc)))
+			_, contents, err := readXML(bytes.NewReader([]byte(xmldoc)), 0)
 			if err != nil {
 				t.Error(err)
 			}

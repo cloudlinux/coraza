@@ -263,7 +263,9 @@ RulesLoop:
 		}
 		// Reset matched_vars only when the previous rule actually populated it.
 		// In typical CRS evaluation most rules don't match, so this avoids
-		// iterating an empty map on every rule.
+		// iterating an empty map on every rule. Len counts stored values, so
+		// this is only a sound emptiness test while Add stays the collection's
+		// sole writer: Set would leave a valueless key that Len does not see.
 		if tx.variables.matchedVars.Len() > 0 {
 			tx.variables.matchedVars.Reset()
 		}

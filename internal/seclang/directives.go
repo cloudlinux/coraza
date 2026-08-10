@@ -286,7 +286,9 @@ func directiveSecRequestBodyAccess(options *DirectiveOptions) error {
 // Default: 1024
 // Syntax: SecRequestBodyJsonDepthLimit [LIMIT]
 // ---
-// Anything over the limit will generate a REQBODY_ERROR in the JSON body processor.
+// Anything over the limit will generate a REQBODY_ERROR (RES_BODY_ERROR on the
+// response path) in the JSON body processor; it bounds both request and
+// response body nesting.
 func directiveSecRequestBodyJsonDepthLimit(options *DirectiveOptions) error {
 	if len(options.Opts) == 0 {
 		return errEmptyOptions
@@ -1376,8 +1378,69 @@ func directiveSecDataset(options *DirectiveOptions) error {
 // Default: 1000
 // Syntax: SecArgumentsLimit [LIMIT]
 // ---
-// Exceeding the limit will not be included.
-// With JSON body processing, there is nothing to do when exceed the limit.
+// The collections a connector fills each cap on their own count: ARGS_GET,
+// ARGS_PATH, ARGS_POST and RESPONSE_ARGS stop accepting arguments once the
+// collection holds this many values. A repeated name costs one per value, the
+// way ModSecurity counts one argument table entry per key=value pair.
+//
+// Collections a body processor fills are capped by that processor instead.
+// Each fills in document order and stops the parse once its argument budget is
+// spent, so no work is done for arguments that are thrown away. ModSecurity v2
+// stops its JSON and XML parsers at the limit the same way, but keeps decoding
+// urlencoded and multipart bodies and discards what it will not store. What a
+// member costs, and how the budget relates to this limit, differ per processor:
+//   - urlencoded: ARGS_POST values, one member each, capped at this limit.
+//   - json: ARGS_POST (request) / RESPONSE_ARGS (response) flattened leaves,
+//     one member each, capped at this limit. The array-length entry recorded
+//     for a non-empty array is not an argument ModSecurity counts, so it is
+//     stored without drawing on the argument budget; those entries share a
+//     budget of this limit scaled by MaxEntriesPerArgument
+//     (internal/bodyprocessors/json.go), and exhausting it drops further
+//     lengths without reporting a truncation, because a document may hold more
+//     arrays than arguments and none of the dropped entries carries a value the
+//     document sent.
+//   - xml: REQUEST_XML attribute values and element text nodes share a budget
+//     of this limit scaled by MaxNodesPerArgument, which documents the scale
+//     (internal/bodyprocessors/xml.go).
+//   - multipart: one member per part, whether it is a field carrying an
+//     ARGS_POST value or a file carrying FILES, FILES_NAMES, FILES_SIZES and
+//     FILES_TMP_NAMES entries, capped at this limit. Fields are capped as
+//     ModSecurity v2 caps them, unlike v3 which leaves them uncapped.
+//     MULTIPART_PART_HEADERS draws on a separate budget of this limit scaled
+//     by MaxHeadersPerPart (internal/bodyprocessors/multipart.go); exhausting
+//     it truncates that collection without aborting the parse.
+//
+// A limit tuned against form posts may therefore trip earlier on JSON bodies,
+// which spend one member per flattened leaf.
+//
+// Whichever collection truncates, REQBODY_ERROR is set to 1 and
+// REQBODY_ERROR_MSG to "SecArgumentsLimit exceeded", the message ModSecurity
+// sets for a query-string, urlencoded or multipart trip; its JSON and XML
+// parsers name their own limits instead, where one string here keeps a rule
+// matching on the message portable across every body type. Rule 200002 in
+// coraza.conf-recommended denies on REQBODY_ERROR. A truncation notice
+// never overwrites a message already set, while a parse failure always
+// replaces one, so the parser's own diagnosis is the text an operator reads.
+// The query string and the path cap the same way and raise the same signal, so
+// a request carrying no body at all can set REQBODY_ERROR.
+// RESPONSE_ARGS is filled while the response is processed, so it and the
+// response body processors report through RES_BODY_ERROR and
+// RES_BODY_ERROR_MSG instead.
+//
+// The JSON body processor additionally bounds the total decoded bytes by the
+// body length plus a slack that is itself proportional to the body until it
+// reaches a ceiling (jsonDecodedBytesScale and jsonDecodedBytesSlack in
+// internal/bodyprocessors/json.go, which explain the shapes they guard
+// against). That budget bounds what is stored, not what inspecting it costs: a
+// body nested deeply enough spends the budget on long flattened paths, and
+// every rule that reads ARGS runs its transformations over each one, so a small
+// deeply-nested body can cost more than a large flat one. SecRequestBodyJsonDepthLimit
+// is what bounds that depth. That budget has no ModSecurity equivalent, is not governed by this
+// directive. Unlike an argument-count trip it is reported as a parse failure,
+// so it names itself in REQBODY_ERROR_MSG (RES_BODY_ERROR_MSG on the response
+// path), which contains "json decoded size limit exceeded" after the body
+// processor name. The leaves decoded before it tripped are still stored.
+//
 // Example:
 // ```apache
 // SecArgumentsLimit 1000

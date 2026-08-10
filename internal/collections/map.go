@@ -17,7 +17,10 @@ import (
 type Map struct {
 	isCaseSensitive bool
 	data            map[string][]keyValue
-	variable        variables.RuleVariable
+	// valueCount is the total number of values held across every key. It is
+	// maintained by the mutators so that Len is O(1) on the argument path.
+	valueCount int
+	variable   variables.RuleVariable
 }
 
 var _ collection.Map = &Map{}
@@ -150,6 +153,7 @@ func (c *Map) Add(key string, value string) {
 		key = strings.ToLower(key)
 	}
 	c.data[key] = append(c.data[key], aVal)
+	c.valueCount++
 }
 
 // Sets the value of a key with the array of strings passed. If the key already exists, it will be overwritten.
@@ -159,6 +163,7 @@ func (c *Map) Set(key string, values []string) {
 		key = strings.ToLower(key)
 	}
 	dataSlice, exists := c.data[key]
+	c.valueCount += len(values) - len(dataSlice)
 	if !exists || cap(dataSlice) < len(values) {
 		dataSlice = make([]keyValue, len(values))
 	} else {
@@ -182,8 +187,10 @@ func (c *Map) SetIndex(key string, index int, value string) {
 	switch {
 	case len(values) == 0:
 		c.data[key] = []keyValue{av}
+		c.valueCount++
 	case len(values) <= index:
 		c.data[key] = append(c.data[key], av)
+		c.valueCount++
 	default:
 		c.data[key][index] = av
 	}
@@ -197,6 +204,7 @@ func (c *Map) Remove(key string) {
 	if len(c.data) == 0 {
 		return
 	}
+	c.valueCount -= len(c.data[key])
 	delete(c.data, key)
 }
 
@@ -210,6 +218,7 @@ func (c *Map) Reset() {
 	for k := range c.data {
 		delete(c.data, k)
 	}
+	c.valueCount = 0
 }
 
 // Format updates the passed strings.Builder with the formatted map key/values.
@@ -237,9 +246,10 @@ func (c *Map) String() string {
 	return res.String()
 }
 
-// Len returns the number of key/value pairs in the map.
+// Len returns the number of values held in the map, counting each value of a
+// repeated key, the way ModSecurity counts argument table entries.
 func (c *Map) Len() int {
-	return len(c.data)
+	return c.valueCount
 }
 
 // keyValue stores the case preserved original key and value

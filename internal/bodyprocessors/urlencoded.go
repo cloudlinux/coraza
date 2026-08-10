@@ -23,13 +23,27 @@ func (*urlencodedBodyProcessor) ProcessRequest(reader io.Reader, v plugintypes.T
 	}
 
 	b := buf.String()
-	values := urlutil.ParseQuery(b, '&')
-	argsCol := v.ArgsPost()
-	for k, vs := range values {
-		argsCol.Set(k, vs)
-	}
 	v.RequestBody().(*collections.Single).Set(b)
 	v.RequestBodyLength().(*collections.Single).Set(strconv.Itoa(len(b)))
+	// Arguments are decoded in document order straight into ARGS_POST, so the
+	// limit truncates deterministically and arguments past it are never
+	// decoded.
+	argsCol := v.ArgsPost()
+	limit := options.ArgumentLimit
+	count := 0
+	overLimit := false
+	urlutil.EachQueryValue(b, '&', func(key, value string) bool {
+		if limit > 0 && count >= limit {
+			overLimit = true
+			return false
+		}
+		argsCol.Add(key, value)
+		count++
+		return true
+	})
+	if overLimit {
+		return ErrArgumentsLimit
+	}
 	return nil
 }
 
