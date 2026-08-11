@@ -40,17 +40,35 @@ func TestRbl(t *testing.T) {
 
 	logger := &testLogger{t}
 
+	// Zone entries carry the reversed names a blocklist actually publishes:
+	// 1.2.3.4 is listed as 4.3.2.1.<zone>. The names differ from the plain
+	// addresses, so a lookup built the wrong way round misses them.
 	srv, err := mockdns.NewServerWithLogger(map[string]mockdns.Zone{
-		"1.1.1.1.xbl.spamhaus.org.": {
-			A: []string{"1.2.3.4"},
-		},
-		"1.1.1.2.xbl.spamhaus.org.": {
-			A:   []string{"1.2.3.5"},
-			TXT: []string{"not blocked"},
-		},
-		"1.1.1.3.xbl.spamhaus.org.": {
-			A:   []string{"1.2.3.6"},
+		"4.3.2.1.xbl.spamhaus.org.": {
+			A:   []string{"127.0.0.2"},
 			TXT: []string{"blocked"},
+		},
+		"5.3.2.1.xbl.spamhaus.org.": {
+			A: []string{"127.0.0.2"},
+		},
+		"1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.xbl.spamhaus.org.": {
+			A:   []string{"127.0.0.2"},
+			TXT: []string{"blocked v6"},
+		},
+		// Only the unreversed name of 1.2.3.6 exists, so the operator must
+		// find nothing for it.
+		"1.2.3.6.xbl.spamhaus.org.": {
+			A:   []string{"127.0.0.2"},
+			TXT: []string{"unreversed"},
+		},
+		// 3.4.5.6 gets the answer a resolver that invents addresses for names
+		// it cannot resolve would give, and 4.4.5.6 the code a zone answers
+		// with when it objects to the query rather than the address.
+		"6.5.4.3.xbl.spamhaus.org.": {
+			A: []string{"203.0.113.9"},
+		},
+		"6.5.4.4.xbl.spamhaus.org.": {
+			A: []string{"127.255.255.254"},
 		},
 	}, logger, false)
 	if err != nil {
@@ -61,20 +79,33 @@ func TestRbl(t *testing.T) {
 	srv.PatchNet(op.(*rbl).resolver)
 	defer mockdns.UnpatchNet(op.(*rbl).resolver)
 
-	t.Run("IP with an A record but no TXT record is not reported listed", func(t *testing.T) {
+	t.Run("Listed IP with TXT record", func(t *testing.T) {
 		tx := corazawaf.NewWAF().NewTransaction()
-		if op.Evaluate(tx, "1.1.1.1") {
-			t.Errorf("an A record without a TXT record must not report the IP as listed")
+		if !op.Evaluate(tx, "1.2.3.4") {
+			t.Fatal("Unexpected result for listed IP")
+		}
+		if want, have := "blocked", tx.Variables().TX().Get("httpbl_msg")[0]; want != have {
+			t.Errorf("Unexpected result for listed IP: want %q, have %q", want, have)
 		}
 	})
 
-	t.Run("Listed IP with TXT record", func(t *testing.T) {
+	t.Run("Listed IP without TXT record", func(t *testing.T) {
 		tx := corazawaf.NewWAF().NewTransaction()
-		if !op.Evaluate(tx, "1.1.1.2") {
-			t.Errorf("Unexpected result for listed IP")
+		if !op.Evaluate(tx, "1.2.3.5") {
+			t.Error("a listed IP whose zone publishes no TXT record must still be reported listed")
 		}
-		if want, have := "not blocked", tx.Variables().TX().Get("httpbl_msg")[0]; want != have {
-			t.Errorf("Unexpected result for listed IP: want %q, have %q", want, have)
+		if got := tx.Variables().TX().Get("httpbl_msg"); len(got) > 0 {
+			t.Errorf("httpbl_msg set without a TXT record: %q", got)
+		}
+	})
+
+	t.Run("Listed IPv6", func(t *testing.T) {
+		tx := corazawaf.NewWAF().NewTransaction()
+		if !op.Evaluate(tx, "2001:db8::1") {
+			t.Fatal("Unexpected result for listed IPv6 address")
+		}
+		if want, have := "blocked v6", tx.Variables().TX().Get("httpbl_msg")[0]; want != have {
+			t.Errorf("Unexpected result for listed IPv6 address: want %q, have %q", want, have)
 		}
 	})
 
@@ -88,15 +119,63 @@ func TestRbl(t *testing.T) {
 		}
 	})
 
-	t.Run("Blocked IP", func(t *testing.T) {
+	t.Run("IP listed only under its unreversed name", func(t *testing.T) {
 		tx := corazawaf.NewWAF().NewTransaction()
-		if !op.Evaluate(tx, "1.1.1.3") {
-			t.Fatal("Unexpected result for blocked IP")
-		}
-		if want, have := "blocked", tx.Variables().TX().Get("httpbl_msg")[0]; want != have {
-			t.Errorf("Unexpected result for blocked IP: want %q, have %q", want, have)
+		if op.Evaluate(tx, "1.2.3.6") {
+			t.Error("the operator queried the unreversed name")
 		}
 	})
+
+	t.Run("Answer outside the listing range", func(t *testing.T) {
+		tx := corazawaf.NewWAF().NewTransaction()
+		if op.Evaluate(tx, "3.4.5.6") {
+			t.Error("an answer outside 127.0.0.0/8 must not be read as a listing")
+		}
+	})
+
+	t.Run("Answer complaining about the query", func(t *testing.T) {
+		tx := corazawaf.NewWAF().NewTransaction()
+		if op.Evaluate(tx, "4.4.5.6") {
+			t.Error("an answer in 127.255.255.0/24 must not be read as a listing")
+		}
+	})
+
+	t.Run("Reason of an earlier match does not survive", func(t *testing.T) {
+		tx := corazawaf.NewWAF().NewTransaction()
+		if !op.Evaluate(tx, "1.2.3.4") {
+			t.Fatal("Unexpected result for listed IP")
+		}
+		if !op.Evaluate(tx, "1.2.3.5") {
+			t.Fatal("Unexpected result for listed IP without a TXT record")
+		}
+		if got := tx.Variables().TX().Get("httpbl_msg"); len(got) > 0 {
+			t.Errorf("httpbl_msg still holds the earlier match's reason: %q", got)
+		}
+	})
+}
+
+func TestRblRequiresAService(t *testing.T) {
+	if _, err := newRBL(plugintypes.OperatorOptions{}); err == nil {
+		t.Error("an @rbl rule with no service hostname must not load")
+	}
+}
+
+func TestRblQueryName(t *testing.T) {
+	tests := []struct{ ip, want string }{
+		{"1.2.3.4", "4.3.2.1.example.com"},
+		{"127.0.0.2", "2.0.0.127.example.com"},
+		{"2001:db8::1", "1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.example.com"},
+		{"::ffff:1.2.3.4", "4.3.2.1.example.com"},
+	}
+	for _, tc := range tests {
+		ip := net.ParseIP(tc.ip)
+		if ip == nil {
+			t.Fatalf("test fixture %q is not an IP address", tc.ip)
+		}
+		if have := rblQueryName(ip, "example.com"); have != tc.want {
+			t.Errorf("rblQueryName(%q): want %q, have %q", tc.ip, tc.want, have)
+		}
+	}
 }
 
 // errorCapturingWAF returns a WAF whose debug logger records, at Error level
