@@ -212,8 +212,10 @@ func TestXMLArgumentsLimitSharedBudget(t *testing.T) {
 
 // TestXMLOrdinaryDocumentsAccepted asserts that documents an ordinary client
 // sends parse whole at the shipped default limit: a SOAP response of several
-// hundred records and a configuration document of several hundred elements
-// both hold more nodes than there are arguments in the budget.
+// hundred records, a configuration document of several hundred elements and an
+// XML-RPC multicall of several hundred parameters all hold more nodes than
+// there are arguments in the budget. Reaching ProcessRequest without an error
+// is what keeps REQUEST_XML populated and REQBODY_ERROR clear.
 func TestXMLOrdinaryDocumentsAccepted(t *testing.T) {
 	bp, err := bodyprocessors.GetBodyProcessor("xml")
 	if err != nil {
@@ -233,12 +235,20 @@ func TestXMLOrdinaryDocumentsAccepted(t *testing.T) {
 	}
 	config.WriteString("</configuration>")
 
+	xmlrpc := strings.Builder{}
+	xmlrpc.WriteString(`<?xml version="1.0"?><methodCall><methodName>system.multicall</methodName><params>`)
+	for i := 0; i < 300; i++ {
+		fmt.Fprintf(&xmlrpc, `<param><value><string>value %d</string></value></param>`, i)
+	}
+	xmlrpc.WriteString(`</params></methodCall>`)
+
 	for _, tc := range []struct {
 		name string
 		body string
 	}{
 		{name: "soap_records", body: soap.String()},
 		{name: "config_elements", body: config.String()},
+		{name: "xmlrpc_multicall", body: xmlrpc.String()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			v := corazawaf.NewTransactionVariables(persistence.NoopEngine{})

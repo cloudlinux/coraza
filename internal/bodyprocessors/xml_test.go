@@ -69,6 +69,75 @@ func TestXMLPayloadFlexibility(t *testing.T) {
 	}
 }
 
+// Elements named after HTML void elements are ordinary containers in XML
+// vocabularies, and their end tag must not abort decoding.
+func TestXMLHTMLVoidElementNames(t *testing.T) {
+	testCases := []struct {
+		Name  string
+		Input string
+		Want  []string
+	}{
+		{
+			Name: "xmlRPCGetUsersBlogs",
+			Input: `<?xml version="1.0"?>
+			<methodCall>
+			  <methodName>wp.getUsersBlogs</methodName>
+			  <params>
+				<param><value><string>admin</string></value></param>
+				<param><value><string>hunter2</string></value></param>
+			  </params>
+			</methodCall>`,
+			Want: []string{"wp.getUsersBlogs", "admin", "hunter2"},
+		},
+		{
+			Name: "xmlRPCMulticall",
+			Input: `<?xml version="1.0"?>
+			<methodCall>
+			  <methodName>system.multicall</methodName>
+			  <params><param><value><array><data>
+				<value><struct>
+				  <member><name>methodName</name><value><string>wp.getCategories</string></value></member>
+				</struct></value>
+			  </data></array></value></param></params>
+			</methodCall>`,
+			Want: []string{"system.multicall", "methodName", "wp.getCategories"},
+		},
+		{
+			Name:  "atomLink",
+			Input: `<entry><link href="https://example.com">alternate</link></entry>`,
+			Want:  []string{"alternate"},
+		},
+		{
+			// Elements left unterminated still decode, so leniency for
+			// unbalanced documents does not depend on self-closing them.
+			Name:  "unterminatedParam",
+			Input: `<methodCall><params><param><value>admin</value></params></methodCall>`,
+			Want:  []string{"admin"},
+		},
+		{
+			Name:  "unterminatedHTMLVoidElements",
+			Input: `<html><body>before<br>after<img src="x"></body></html>`,
+			Want:  []string{"before", "after"},
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			_, contents, err := readXML(bytes.NewReader([]byte(tc.Input)), 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, want := len(contents), len(tc.Want); got != want {
+				t.Fatalf("contents count mismatch, got=%d (%v), want=%d", got, contents, want)
+			}
+			for i := range contents {
+				if got, want := contents[i], tc.Want[i]; got != want {
+					t.Errorf("Expected content got=%s, want=%s", got, want)
+				}
+			}
+		})
+	}
+}
+
 func TestXMLUnexpectedEOF(t *testing.T) {
 	testCases := []struct {
 		Name  string
