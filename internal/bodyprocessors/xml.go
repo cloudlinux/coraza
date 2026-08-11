@@ -50,8 +50,14 @@ func readXML(reader io.Reader, limit int) ([]string, []string, error) {
 	var attrs []string
 	var content []string
 	dec := xml.NewDecoder(reader)
+	// Strict false is what lets an element be closed by an ancestor's end tag
+	// rather than its own, so an unterminated element costs only itself; a body
+	// cut short is tolerated separately, by the unexpected EOF branch below.
+	// AutoClose stays unset: it self-closes the elements on Go's HTML void list,
+	// and param, link, input and col are ordinary container elements in XML-RPC,
+	// Atom and SOAP bodies, whose real end tag would then abort decoding as
+	// unexpected.
 	dec.Strict = false
-	dec.AutoClose = xml.HTMLAutoClose
 	dec.Entity = xml.HTMLEntity
 	for {
 		token, err := dec.Token()
