@@ -1809,6 +1809,7 @@ func (tx *Transaction) auditLogCollectFiles() []plugintypes.AuditLogTransactionR
 func (tx *Transaction) Close() error {
 	defer tx.WAF.txPool.Put(tx)
 
+	tx.debugLogger.Info().Msg(fmt.Sprintf("closing transaction, pointer %p", tx))
 	var errs []error
 	if environment.HasAccessToFS {
 		// UploadKeepFilesRelevantOnly keeps temporary files only when there are
@@ -1856,6 +1857,9 @@ func (tx *Transaction) Close() error {
 			Bool("is_interrupted", false).
 			Msg("Transaction finished")
 	}
+
+	tx.transformationCache = map[transformationKey]*transformationValue{}
+	tx.variables = *NewTransactionVariables(tx.WAF.persistenceEngine)
 
 	if len(errs) == 0 {
 		return nil
