@@ -97,6 +97,7 @@ type wafRule struct {
 // We still basically assume 64-bit usage where int are big sizes.
 type wafConfig struct {
 	ruleObserver              func(rule types.RuleMetadata)
+	rxPreFilterObserver       func(ruleID int)
 	rules                     []wafRule
 	auditLog                  *auditLogConfig
 	requestBodyAccess         bool
@@ -126,6 +127,12 @@ func (c *wafConfig) WithRules(rules ...*corazawaf.Rule) WAFConfig {
 func (c *wafConfig) WithRuleObserver(observer func(rule types.RuleMetadata)) WAFConfig {
 	ret := c.clone()
 	ret.ruleObserver = observer
+	return ret
+}
+
+func (c *wafConfig) WithRxPreFilterObserver(observer func(ruleID int)) WAFConfig {
+	ret := c.clone()
+	ret.rxPreFilterObserver = observer
 	return ret
 }
 

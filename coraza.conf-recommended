@@ -17,6 +17,15 @@ SecRuleEngine DetectionOnly
 #
 SecRxPreFilter Off
 
+# Percentage (0-100) of the regex evaluations skipped by SecRxPreFilter that run
+# anyway. A match proves the pre-filter wrong: the rule is evaluated without it
+# from then on and the WAF observer, if configured, is told the rule ID.
+# 100 makes the rules match exactly as with SecRxPreFilter Off, 0 never checks.
+# Has no effect while SecRxPreFilter is Off. Like SecRxPreFilter, it applies to
+# the rules defined after it.
+#
+#SecRxPreFilterVerify 1
+
 # -- Request body handling ---------------------------------------------------
 
 # Allows Coraza to access request bodies. Without this, Coraza

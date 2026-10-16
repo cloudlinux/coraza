@@ -49,6 +49,8 @@ func NewWAF(config WAFConfig) (WAF, error) {
 		waf.Rules.SetObserver(c.ruleObserver)
 	}
 
+	waf.RxPreFilterObserver = c.rxPreFilterObserver
+
 	parser := seclang.NewParser(waf)
 
 	if c.fsRoot != nil {

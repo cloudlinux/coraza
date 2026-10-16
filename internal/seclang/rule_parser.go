@@ -198,9 +198,27 @@ func (rp *RuleParser) ParseOperator(operator string) error {
 		Root:     rp.options.ParserConfig.Root,
 		Datasets: rp.options.Datasets,
 	}
-	if rp.options.WAF != nil {
-		opts.Memoizer = rp.options.WAF.Memoizer()
-		opts.RxPreFilterEnabled = rp.options.WAF.RxPreFilterEnabled
+	if waf := rp.options.WAF; waf != nil {
+		opts.Memoizer = waf.Memoizer()
+		opts.RxPreFilterEnabled = waf.RxPreFilterEnabled
+		if waf.RxPreFilterEnabled && waf.RxPreFilterVerify > 0 {
+			opts.RxPreFilterVerify = waf.RxPreFilterVerify
+			rule := rp.rule
+			opts.RxPreFilterMiss = func() {
+				observer := waf.RxPreFilterObserver
+				if observer == nil {
+					return
+				}
+				// The rule's own ID is read now, not when the operator is parsed: the id
+				// action comes after the operator. A chained rule has none, its chain
+				// starter's ID is the one a ruleset knows it by.
+				id := rule.ID_
+				if id == 0 {
+					id = rule.ParentID_
+				}
+				observer(id)
+			}
+		}
 	}
 
 	if wd := rp.options.ParserConfig.WorkingDir; wd != "" {
