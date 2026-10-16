@@ -11,8 +11,8 @@
 //
 //	CORAZA_RX_PARITY=1 go test -count=1 -run TestRxPreFilterParity -v ./testing/coreruleset/
 //
-// CORAZA_RX_PARITY_RULES=<dir with *.conf>  also runs that ruleset (the Imunify360 "full"
-//                                           coraza archive, unzipped), engine On and DetectionOnly
+// CORAZA_RX_PARITY_RULES=<dir with *.conf>  also runs that ruleset (an unzipped ruleset
+//                                           archive), engine On and DetectionOnly
 // CORAZA_RX_PARITY_LIMIT=<n>                only the first n distinct FTW requests (smoke run)
 // CORAZA_RX_PARITY_CARRIERS=a,b             only these carriers (see parityBuild)
 // CORAZA_RX_PARITY_REPORT=<file>            also write the report there

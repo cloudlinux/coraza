@@ -1,6 +1,10 @@
-# Checks that SecRxPreFilter On and Off agree on the Imunify360 ruleset published today, for the
-# fork build that was just tagged. See docs/rx-prefilter-gate.md. A red run means: do not enable
-# SecRxPreFilter On with this tag.
+# Checks that SecRxPreFilter On and Off agree on a ruleset, for the fork build that was just tagged.
+# See docs/rx-prefilter-gate.md. A red run means: do not enable SecRxPreFilter On with this tag.
+#
+# The ruleset is not in this repository. Set the repository variable RX_PREFILTER_RULESET_URL to
+# an https URL of a zip with the ruleset's *.conf files (optionally RX_PREFILTER_RULESET_SHA256 to
+# pin it), or pass ruleset_url when starting the workflow by hand. Without either the run fails:
+# a gate that quietly checks nothing would be worse than no gate.
 name: Rx prefilter gate
 
 on:
@@ -16,6 +20,10 @@ on:
           - full
           - pattern
         default: full
+      ruleset_url:
+        description: "https URL of a zip with the ruleset's *.conf (default: variable RX_PREFILTER_RULESET_URL)"
+        type: string
+        required: false
 
 permissions: {}
 
@@ -33,10 +41,25 @@ jobs:
         with:
           go-version: 1.25.x
           cache: true
+      - name: Fetch the ruleset
+        env:
+          RULESET_URL: ${{ github.event.inputs.ruleset_url || vars.RX_PREFILTER_RULESET_URL }}
+          RULESET_SHA256: ${{ vars.RX_PREFILTER_RULESET_SHA256 }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RULESET_URL" ]; then
+            echo "::error::set the repository variable RX_PREFILTER_RULESET_URL (https URL of a zip with the ruleset's *.conf) or pass ruleset_url"
+            exit 1
+          fi
+          case "$RULESET_URL" in https://*) ;; *) echo "::error::the ruleset URL has to be https"; exit 1 ;; esac
+          mkdir -p build/ruleset
+          curl -fsSL --proto '=https' "$RULESET_URL" -o build/ruleset.zip
+          if [ -n "$RULESET_SHA256" ]; then echo "$RULESET_SHA256  build/ruleset.zip" | sha256sum -c -; fi
+          unzip -q -j build/ruleset.zip -d build/ruleset
       - name: Prefilter gate
         env:
           MODE: ${{ github.event.inputs.mode || 'full' }}
-        run: bash scripts/rx-prefilter-gate.sh --download --mode "$MODE"
+        run: bash scripts/rx-prefilter-gate.sh --rules build/ruleset --mode "$MODE"
       - name: Summary
         if: always()
         run: |

@@ -2,7 +2,6 @@
 # Fails when SecRxPreFilter On and Off disagree on a ruleset. See docs/rx-prefilter-gate.md.
 #
 #   scripts/rx-prefilter-gate.sh --rules <dir with *.conf>        # pattern check only (seconds)
-#   scripts/rx-prefilter-gate.sh --download                       # fetch the latest Imunify360 coraza archive first
 #   scripts/rx-prefilter-gate.sh --rules <dir> --mode full        # pattern check, then the end-to-end replay
 #   scripts/rx-prefilter-gate.sh --rules <dir> --mode full --limit 200   # smoke run of the replay
 #   scripts/rx-prefilter-gate.sh --rules <dir> --audit-logs <file or dir>   # also replay production requests
@@ -27,13 +26,11 @@
 #   CORAZA_PREFILTER_SAMPLES         generated inputs per pattern (default 300)
 #   MIN_PATTERNS                     fail if the ruleset yields fewer @rx patterns (default 100), so
 #                                    a ruleset that failed to unpack cannot pass by being empty
-#   RULESET_INDEX                    description.json that --download reads
 set -uo pipefail
 
 MODE=pattern
 RULES=""
 LIMIT=""
-DOWNLOAD=0
 AUDIT=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -41,13 +38,12 @@ while [ $# -gt 0 ]; do
     --audit-logs) AUDIT="${2:-}"; shift 2 ;;
     --mode)     MODE="${2:-}"; shift 2 ;;
     --limit)    LIMIT="${2:-}"; shift 2 ;;
-    --download) DOWNLOAD=1; shift ;;
     -h|--help)  awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 case "$MODE" in pattern|full) ;; *) echo "--mode must be pattern or full" >&2; exit 2 ;; esac
-if [ "$DOWNLOAD" = 0 ] && [ -z "$RULES" ]; then echo "give --rules <dir> or --download" >&2; exit 2; fi
+if [ -z "$RULES" ]; then echo "give --rules <dir with the ruleset's *.conf>" >&2; exit 2; fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
@@ -55,7 +51,6 @@ OUT="${OUT:-$ROOT/build/rx-prefilter-gate}"
 case "$OUT" in /*) ;; *) OUT="$ROOT/$OUT" ;; esac
 SAMPLES="${CORAZA_PREFILTER_SAMPLES:-300}"
 MIN_PATTERNS="${MIN_PATTERNS:-100}"
-INDEX="${RULESET_INDEX:-https://files.imunify360.com/static/modsec/v2/description.json}"
 mkdir -p "$OUT"
 SUMMARY="$OUT/summary.txt"
 : > "$SUMMARY"
@@ -64,24 +59,6 @@ say() { echo "$*" | tee -a "$SUMMARY"; }
 fail=0
 
 # ---- the ruleset ---------------------------------------------------------------
-if [ "$DOWNLOAD" = 1 ]; then
-  DESC="$OUT/description.json"
-  curl -fsS -L --compressed "$INDEX" -o "$DESC" || { say "could not fetch $INDEX"; say "RESULT: FAIL"; exit 1; }
-  LINE="$(awk '
-    $1 ~ /md5sum/{ hs=$2; next };
-    $1 ~ /url/ && $2 ~ /coraza/ && $2 ~ /full/ && $2 !~ /meta|modsec3/ {
-      gsub(/[",]/,"",hs); gsub(/[",]/,"",$2); print hs, $2 }' "$DESC" | head -n1)"
-  [ -n "$LINE" ] || { say "no coraza full archive in $INDEX"; say "RESULT: FAIL"; exit 1; }
-  WANT="${LINE%% *}"; URL="${LINE##* }"
-  ZIP="$OUT/$(basename "$URL")"
-  curl -fsS -L --compressed "$URL" -o "$ZIP" || { say "download of $URL failed"; say "RESULT: FAIL"; exit 1; }
-  GOT="$(md5sum "$ZIP" | cut -d' ' -f1)"
-  [ "$GOT" = "$WANT" ] || { say "md5 mismatch for $URL (want $WANT, got $GOT)"; say "RESULT: FAIL"; exit 1; }
-  RULES="$OUT/ruleset"
-  rm -rf "$RULES"; mkdir -p "$RULES"
-  unzip -q -j "$ZIP" -d "$RULES" || { say "unzip failed"; say "RESULT: FAIL"; exit 1; }
-  say "archive: $URL (md5 $GOT)"
-fi
 RULES="$(cd "$RULES" 2>/dev/null && pwd)" || { say "no such directory: $RULES"; say "RESULT: FAIL"; exit 1; }
 [ -n "$(ls "$RULES"/*.conf 2>/dev/null)" ] || { say "no *.conf in $RULES"; say "RESULT: FAIL"; exit 1; }
 say "ruleset: $RULES   version: $(head -n1 "$RULES/VERSION" 2>/dev/null || echo unknown)   conf files: $(ls "$RULES"/*.conf | wc -l)   SecRule lines: $(cat "$RULES"/*.conf | grep -c '^[[:space:]]*SecRule')"

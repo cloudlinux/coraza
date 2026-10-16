@@ -6,9 +6,9 @@
 // rxprefilter_lab_test.go: differential check of the @rx prefilter against a real
 // ruleset. It is run by scripts/rx-prefilter-gate.sh (see docs/rx-prefilter-gate.md),
 // not by the regular suite: it skips unless CORAZA_PREFILTER_RULES names a directory
-// of *.conf files (for example the Imunify360 coraza "full" archive, unzipped). It
-// could not be an engine profile or a table row because its input is a ruleset that
-// is not in this repository and changes every day.
+// of *.conf files (an unzipped ruleset archive, say). It could not be an engine
+// profile or a table row because its input is a ruleset that is not in this
+// repository and changes every day.
 //
 // For every @rx pattern in that ruleset it builds the operator twice, with and
 // without the prefilter, feeds both the same inputs and requires the same answer.
