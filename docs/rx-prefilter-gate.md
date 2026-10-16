@@ -12,6 +12,7 @@ server only when the gate passed for the ruleset and the fork tag that server ru
 bash scripts/rx-prefilter-gate.sh --rules <dir with the ruleset's *.conf>
 bash scripts/rx-prefilter-gate.sh --download                 # latest Imunify360 coraza archive
 bash scripts/rx-prefilter-gate.sh --download --mode full     # adds the end-to-end replay
+bash scripts/rx-prefilter-gate.sh --rules <dir> --audit-logs <file or dir>   # adds production requests
 ```
 
 It needs Go and a checkout of the fork at the tag the product pins. Exit status 0 means
@@ -27,11 +28,32 @@ The ruleset build should run `pattern` on every candidate ruleset: it is cheap e
 on each daily rule edit, before the ruleset is published. The workflow `rx-prefilter-gate.yml` runs `full` on every `v*-cl*`
 tag and can be started by hand.
 
+## Replaying production requests
+
+`--audit-logs <file or directory>` replays the requests in JSON audit logs
+(`SecAuditLogFormat JSON`, `*.gz` unzipped) through the ruleset, Off against On, in
+`DetectionOnly` and in `On`. A request is replayed as logged: method, URI, headers and the
+body. The body is in the log only with part C in `SecAuditLogParts`. wafd keeps only the first
+4 KiB of a body, and the Imunify ruleset removes part C itself (`ctl:auditLogParts=ABFHZ`) for
+file uploads and for requests whose body did not parse. The summary counts the requests logged
+without a body and with only the start of one; Off and On are still compared on what survived,
+but file-upload rules cannot be replayed from audit logs (the pattern check and the
+end-to-end replay cover them). The replay also reports how many of the rules the log lists
+matched again with the prefilter off, for the requests with their whole body. A rule that does
+not is not a prefilter finding (the ruleset can differ from the one that logged it, and
+response-phase rules never ran), but a large share means the replay is not reading the log
+properly.
+
+`--mode full` runs a self-check first: it writes an audit log with the ruleset and the CRS
+corpus as traffic, replays that, and fails unless the replay reads it back and reproduces the
+rules it lists. The report of a real replay holds request lines, which can carry customer
+data: keep it inside the company.
+
 ## What it does not cover
 
-Both modes use generated and corpus inputs, not production traffic. They do not replace
-replaying real blocked requests from audit logs, and they say nothing about performance. A
-pattern the generator cannot build matching inputs for is compared on fewer inputs; the
+`pattern` and `full` use generated and corpus inputs; only `--audit-logs` uses production
+traffic, and only the requests that were logged. None of it says anything about performance.
+A pattern the generator cannot build matching inputs for is compared on fewer inputs; the
 `inputs compared, N of them matched by the regex` line shows how many it could.
 
 ## Knobs

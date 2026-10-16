@@ -809,6 +809,19 @@ func maxFloat(a, b float64) float64 {
 	return b
 }
 
+// parityOfflineDNS makes every DNS lookup of the process fail at once and returns the function
+// that puts the resolver back. The Imunify ruleset queries live DNS blocklists (@rbl). Answers
+// change and offline they time out, so every @rbl rule reports "not listed", the same way in
+// the run with the prefilter off and the one with it on.
+func parityOfflineDNS() (restore func()) {
+	oldPreferGo, oldDial := net.DefaultResolver.PreferGo, net.DefaultResolver.Dial
+	net.DefaultResolver.PreferGo = true
+	net.DefaultResolver.Dial = func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("DNS is off in the prefilter tests")
+	}
+	return func() { net.DefaultResolver.PreferGo, net.DefaultResolver.Dial = oldPreferGo, oldDial }
+}
+
 // ---------------------------------------------------------------- the test
 
 func TestRxPreFilterParity(t *testing.T) {
@@ -816,15 +829,7 @@ func TestRxPreFilterParity(t *testing.T) {
 		t.Skip("set CORAZA_RX_PARITY=1 to run; CORAZA_RX_PARITY_RULES=<dir with *.conf> adds a ruleset")
 	}
 
-	// The Imunify ruleset queries live DNS blocklists (@rbl). Answers change and offline they
-	// time out, so the lookups fail at once here: every @rbl rule reports "not listed", the
-	// same way in both runs.
-	oldPreferGo, oldDial := net.DefaultResolver.PreferGo, net.DefaultResolver.Dial
-	net.DefaultResolver.PreferGo = true
-	net.DefaultResolver.Dial = func(context.Context, string, string) (net.Conn, error) {
-		return nil, errors.New("DNS is off in the prefilter parity test")
-	}
-	defer func() { net.DefaultResolver.PreferGo, net.DefaultResolver.Dial = oldPreferGo, oldDial }()
+	defer parityOfflineDNS()()
 
 	bases := parityLoadCorpus(t)
 	if s := os.Getenv("CORAZA_RX_PARITY_LIMIT"); s != "" {

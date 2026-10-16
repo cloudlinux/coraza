@@ -5,13 +5,18 @@
 #   scripts/rx-prefilter-gate.sh --download                       # fetch the latest Imunify360 coraza archive first
 #   scripts/rx-prefilter-gate.sh --rules <dir> --mode full        # pattern check, then the end-to-end replay
 #   scripts/rx-prefilter-gate.sh --rules <dir> --mode full --limit 200   # smoke run of the replay
+#   scripts/rx-prefilter-gate.sh --rules <dir> --audit-logs <file or dir>   # also replay production requests
 #
 # Modes:
 #   pattern  every @rx pattern of the ruleset, built with and without the prefilter, fed inputs
 #            generated from the pattern itself (internal/operators, TestRxPrefilterAgainstLabRuleset)
 #   full     pattern, then the CRS regression corpus carried six ways through the bundled CRS and
 #            through the ruleset, Off against On (testing/coreruleset, TestRxPreFilterParity;
-#            about 10 minutes)
+#            about 10 minutes), then a self-check of the audit-log replay (writes a log with the
+#            ruleset and replays it)
+#   --audit-logs PATH   in any mode, replays the requests in these JSON audit logs (a file or a
+#            directory, *.gz unzipped; wafd needs SecAuditLogParts with C to log the body) through
+#            the ruleset, Off against On (TestRxPreFilterAuditReplay). The report has request lines.
 #
 # Exit status: 0 when Off and On agree everywhere, 1 on any disagreement or when a check could
 # not run, 2 on bad usage. Output goes to $OUT (default build/rx-prefilter-gate); summary.txt there
@@ -29,9 +34,11 @@ MODE=pattern
 RULES=""
 LIMIT=""
 DOWNLOAD=0
+AUDIT=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --rules)    RULES="${2:-}"; shift 2 ;;
+    --audit-logs) AUDIT="${2:-}"; shift 2 ;;
     --mode)     MODE="${2:-}"; shift 2 ;;
     --limit)    LIMIT="${2:-}"; shift 2 ;;
     --download) DOWNLOAD=1; shift ;;
@@ -118,6 +125,40 @@ if [ "$MODE" = full ]; then
     fail=1
   else
     say "end-to-end replay: PASS"
+  fi
+
+  say ""
+  say "== audit-log replay self-check (a log written with this ruleset, replayed)"
+  rm -f "$OUT/selfcheck-audit.log"
+  CORAZA_RX_AUDIT_SELFCHECK=1 CORAZA_RX_PARITY_RULES="$RULES" CORAZA_RX_AUDIT_SELFCHECK_LOG="$OUT/selfcheck-audit.log" \
+    go test ./testing/coreruleset/ -run '^TestRxPreFilterAuditReplaySelfCheck$' -count=1 -v -timeout 0 >"$OUT/audit-selfcheck.log" 2>&1
+  rc=$?
+  grep -E 'corpus requests written|requests with their whole body|not compared with the log|logged rules that did not|requests that differ' "$OUT/audit-selfcheck.log" | sed 's/^ *//' | tee -a "$SUMMARY"
+  if [ "$rc" != 0 ]; then
+    say "audit-log replay self-check FAILED (exit $rc)"
+    grep -E '^\s+prefilter_replay_test.go:[0-9]+:|--- FAIL|panic' "$OUT/audit-selfcheck.log" | head -20 | tee -a "$SUMMARY"
+    fail=1
+  else
+    say "audit-log replay self-check: PASS"
+  fi
+fi
+
+# ---- 3. production requests from audit logs ------------------------------------
+if [ -n "$AUDIT" ]; then
+  say ""
+  say "== audit-log replay ($AUDIT)"
+  CORAZA_RX_AUDIT_LOGS="$AUDIT" CORAZA_RX_PARITY_RULES="$RULES" CORAZA_RX_AUDIT_REPORT="$OUT/audit-replay-report.txt" \
+    go test ./testing/coreruleset/ -run '^TestRxPreFilterAuditReplay$' -count=1 -v -timeout 0 >"$OUT/audit-replay.log" 2>&1
+  rc=$?
+  if [ -s "$OUT/audit-replay-report.txt" ]; then
+    grep -E '^audit logs|file\(s\)|^==|requests run|requests that differ|requests with their whole body|not compared with the log|logged rules that did not' "$OUT/audit-replay-report.txt" | sed 's/^ *//' | tee -a "$SUMMARY"
+  fi
+  if [ "$rc" != 0 ]; then
+    say "audit-log replay FAILED (exit $rc); see $OUT/audit-replay-report.txt (it holds request lines: keep it internal) and audit-replay.log"
+    [ -s "$OUT/audit-replay-report.txt" ] || tail -n 30 "$OUT/audit-replay.log" | tee -a "$SUMMARY"
+    fail=1
+  else
+    say "audit-log replay: PASS"
   fi
 fi
 
