@@ -68,6 +68,7 @@ var (
 	_ directive = directiveSecDataset
 	_ directive = directiveSecArgumentsLimit
 	_ directive = directiveSecRxPreFilter
+	_ directive = directiveSecRxPreFilterVerify
 )
 
 var directivesMap = map[string]directive{
@@ -133,6 +134,7 @@ var directivesMap = map[string]directive{
 	"secdataset":                     directiveSecDataset,
 	"secargumentslimit":              directiveSecArgumentsLimit,
 	"secrxprefilter":                 directiveSecRxPreFilter,
+	"secrxprefilterverify":           directiveSecRxPreFilterVerify,
 
 	// Unsupported directives
 	"secargumentseparator":     directiveUnsupported,

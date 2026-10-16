@@ -10,6 +10,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"unicode/utf8"
 
@@ -418,6 +420,163 @@ func TestPrefilterCapturingCorrectness(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestPrefilterVerify covers SecRxPreFilterVerify: a prefilter decision is
+// re-checked with the regex at the configured probability, and a match proves the
+// prefilter wrong. No ruleset can make the prefilter wrong (finding that out is what
+// scripts/rx-prefilter-gate.sh is for), so the rows break one operator by hand. That is
+// why this is not an engine profile.
+func TestPrefilterVerify(t *testing.T) {
+	breakPrefilter := func(o *rx) { o.prefilter = func(string) bool { return false } }
+	breakMinLen := func(o *rx) { o.minLen = 1000 }
+	breakExactMatch := func(o *rx) { o.exactMatch = "Other" }
+	intact := func(*rx) {}
+
+	tests := []struct {
+		name       string
+		pattern    string
+		verify     float64
+		breakIt    func(*rx)
+		input      string
+		want       bool
+		wantMisses int
+	}{
+		{"not verified: the wrong prefilter hides the match", "hello.*world", 0, breakPrefilter, "hello big world", false, 0},
+		{"verified: the wrong prefilter is caught and the match found", "hello.*world", 1, breakPrefilter, "hello big world", true, 1},
+		{"verified: the wrong minimum length is caught", "hello.*world", 1, breakMinLen, "hello big world", true, 1},
+		{"verified: the wrong exact match is caught", "^Upload$", 1, breakExactMatch, "Upload", true, 1},
+		{"verified, intact prefilter rejects a non-match: no miss", "hello.*world", 1, intact, "nothing here", false, 0},
+		{"verified, intact prefilter accepts a match: no miss", "hello.*world", 1, intact, "hello big world", true, 0},
+		{"verified, intact exact match says not equal: no miss", "^Upload$", 1, intact, "xUpload", false, 0},
+		{"verified, intact exact match says equal: no miss", "^Upload$", 1, intact, "Upload", true, 0},
+		{"verified, the wrong prefilter rejects a non-match: no miss", "hello.*world", 1, breakPrefilter, "nothing here", false, 0},
+		{"a probability too small to ever check", "hello.*world", 1e-12, breakPrefilter, "hello big world", false, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			misses := 0
+			op, err := newRX(plugintypes.OperatorOptions{
+				Arguments:          tc.pattern,
+				RxPreFilterEnabled: true,
+				RxPreFilterVerify:  tc.verify,
+				RxPreFilterMiss:    func() { misses++ },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			o := op.(*rx)
+			tc.breakIt(o)
+			tx := corazawaf.NewWAF().NewTransaction()
+
+			if got := o.Evaluate(tx, tc.input); got != tc.want {
+				t.Errorf("Evaluate(%q, %q) = %v, want %v", tc.pattern, tc.input, got, tc.want)
+			}
+			if misses != tc.wantMisses {
+				t.Errorf("%d miss reports, want %d", misses, tc.wantMisses)
+			}
+			if tc.wantMisses == 0 {
+				return
+			}
+			// A rule that caught its prefilter wrong evaluates like one without a
+			// prefilter from then on, and tells nobody a second time.
+			if !o.off.Load() {
+				t.Error("the prefilter is still in use after a miss")
+			}
+			if got := o.Evaluate(tx, tc.input); !got {
+				t.Errorf("second Evaluate(%q, %q) = false, want true", tc.pattern, tc.input)
+			}
+			if got := o.Evaluate(tx, "nothing here"); got {
+				t.Errorf("Evaluate(%q, a non-match) = true, want false", tc.pattern)
+			}
+			if misses != 1 {
+				t.Errorf("%d miss reports after three evaluations, want 1", misses)
+			}
+		})
+	}
+
+	// The probability is applied per decision: at 0.5 a wrong prefilter is caught
+	// long before 1000 matching inputs, and it is caught once.
+	t.Run("a probability of one half catches it soon", func(t *testing.T) {
+		misses := 0
+		op, err := newRX(plugintypes.OperatorOptions{
+			Arguments:          "hello.*world",
+			RxPreFilterEnabled: true,
+			RxPreFilterVerify:  0.5,
+			RxPreFilterMiss:    func() { misses++ },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		o := op.(*rx)
+		breakPrefilter(o)
+		tx := corazawaf.NewWAF().NewTransaction()
+		for i := 0; i < 1000; i++ {
+			o.Evaluate(tx, "hello big world")
+		}
+		if misses != 1 {
+			t.Errorf("%d miss reports over 1000 evaluations, want 1", misses)
+		}
+	})
+
+	// A miss with nobody to tell, and with the capture action on: the rule still
+	// gets the regex's answer, and its capture groups.
+	t.Run("no observer, capturing", func(t *testing.T) {
+		op, err := newRX(plugintypes.OperatorOptions{
+			Arguments:          "som(.*)ta",
+			RxPreFilterEnabled: true,
+			RxPreFilterVerify:  1,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		o := op.(*rx)
+		breakPrefilter(o)
+		tx := corazawaf.NewWAF().NewTransaction()
+		tx.Capture = true
+		if !o.Evaluate(tx, "somedata") {
+			t.Fatal("Evaluate = false, want true")
+		}
+		if got := tx.Variables().TX().Get("1"); len(got) == 0 || got[0] != "eda" {
+			t.Errorf("capture group 1 = %v, want [eda]", got)
+		}
+	})
+
+	// Requests run on many goroutines: the miss is reported once, and the race
+	// detector sees the flag.
+	t.Run("concurrent evaluations report once", func(t *testing.T) {
+		var misses atomic.Int32
+		op, err := newRX(plugintypes.OperatorOptions{
+			Arguments:          "hello.*world",
+			RxPreFilterEnabled: true,
+			RxPreFilterVerify:  1,
+			RxPreFilterMiss:    func() { misses.Add(1) },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		o := op.(*rx)
+		breakPrefilter(o)
+		waf := corazawaf.NewWAF()
+		var wg sync.WaitGroup
+		for g := 0; g < 8; g++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				tx := waf.NewTransaction()
+				for i := 0; i < 200; i++ {
+					if !o.Evaluate(tx, "hello big world") {
+						t.Error("Evaluate = false, want true")
+						return
+					}
+				}
+			}()
+		}
+		wg.Wait()
+		if got := misses.Load(); got != 1 {
+			t.Errorf("%d miss reports, want 1", got)
+		}
+	})
 }
 
 func TestContainsFoldASCII(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -1870,6 +1871,52 @@ func directiveSecRxPreFilter(options *DirectiveOptions) error {
 		return err
 	}
 	options.WAF.RxPreFilterEnabled = b
+	return nil
+}
+
+// Description: Re-checks a sample of the inputs the @rx pre-filter rejects, to catch a
+// pre-filter that is wrong.
+// Syntax: SecRxPreFilterVerify percentage
+// Default: 0
+// ---
+// With SecRxPreFilter On, the pre-filter makes the @rx operator skip a regular expression
+// when a literal the pattern needs is missing from the input. A bug in it would hide a match
+// without any error. This directive sets the percentage, from 0 to 100 (decimals allowed),
+// of those skips that run the regular expression anyway:
+//
+//   - 100 checks every skip. The rules match exactly as with SecRxPreFilter Off, the
+//     pre-filter only costs its own time. Use it to find out whether the pre-filter is
+//     wrong on your traffic before relying on it.
+//   - A small value such as 1 keeps most of the saving and still checks every ruleset
+//     and every Coraza build.
+//   - 0, the default, never checks.
+//
+// When a check finds a match the pre-filter was wrong. The rule is evaluated without
+// the pre-filter from then on, until the rules are loaded again, and the observer
+// configured with the WAF (see experimental.WAFConfigWithRxPreFilterObserver) is told the
+// rule ID once. The request that found the match is evaluated correctly. Like
+// SecRxPreFilter, it applies to the rules defined after it and has no effect while
+// SecRxPreFilter is Off.
+//
+// Example:
+// ```seclang
+// SecRxPreFilter On
+// SecRxPreFilterVerify 1
+// ```
+func directiveSecRxPreFilterVerify(options *DirectiveOptions) error {
+	if len(options.Opts) == 0 {
+		return errEmptyOptions
+	}
+
+	percentage, err := strconv.ParseFloat(options.Opts, 64)
+	if err != nil {
+		return err
+	}
+	// NaN fails both comparisons, so test it explicitly.
+	if math.IsNaN(percentage) || percentage < 0 || percentage > 100 {
+		return errors.New("syntax error: [0-100]")
+	}
+	options.WAF.RxPreFilterVerify = percentage / 100
 	return nil
 }
 
