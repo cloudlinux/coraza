@@ -4,7 +4,7 @@
 - **Date:** 2026-10-14 (expected; update before merge)
 - **Version:** unreleased (post-v3.8.1-cl5)
 - **PR:** [#26](https://github.com/cloudlinux/coraza/pull/26) (expected number; update before merge)
-- **Issue(s):** No linked issue (CloudLinux DEF-57621, large JSON request bodies)
+- **Issue(s):** No linked issue (large JSON request bodies)
 - **Deciders:** Gabriel Grigoras (CloudLinux)
 - **Category:** Perf
 
@@ -18,13 +18,13 @@ shorter than the shortest pattern.
 
 For a value that is large and not short, nothing avoids it. Each `@pm` rule
 tests each of its targets, so a large request body is copied once per rule and
-per argument. A CPU and allocation profile of the Imunify360 "full" coraza
+per argument. A CPU and allocation profile of a production
 ruleset (7152 `SecRule` lines) handling one POST with a JSON object of 8 members
-and 4.7 MB in total (the `perf-cloudways-badday` lab shape of DEF-57621) shows
+and 4.7 MB in total shows
 `AhoCorasick.Iter` as 1209 MB of the 2025 MB allocated over 6 transactions, 60%
 of all allocations and about 200 MB, some 40 times the body, per transaction. The
 copy is also a share of the `memmove` time that remains once `SecRxPreFilter`
-has removed most regular-expression work. The wafd process handles these bodies
+has removed most regular-expression work. An integration handles these bodies
 on its request path, and allocation volume sets how often its GC runs, which
 every request next to them pays for.
 
@@ -77,7 +77,7 @@ captured text is sliced from the original string, not from the view.
 ## Technical Discussion
 
 No substantive technical discussion recorded; the change was drafted from the
-DEF-57621 profile and has not been reviewed yet.
+profile above and has not been reviewed yet.
 
 ## Participants
 
@@ -89,12 +89,12 @@ DEF-57621 profile and has not been reviewed yet.
   value. `TestPmDoesNotCopyLargeValue` asserts at most 1/16 of a 1 MiB value
   allocated per evaluation, where the copy allocated all of it.
   `BenchmarkPmLargeValue` measures it per value size; the before and after
-  figures, and the effect on the 4.7 MB lab body, are in the pull request.
+  figures, and the effect on the 4.7 MB body, are in the pull request.
 - **Negative / follow-up:** One more use of `unsafe`, in the one place the
   project already accepts it, with a documented read-only contract. The fork now
   carries this patch relative to upstream; it is small and can be proposed
   upstream. Replacing the Aho-Corasick matcher of `@pm` with a faster one stays
-  open: it is the largest CPU cost left after the prefilter in the DEF-57621
+  open: it is the largest CPU cost left after the prefilter in that
   profile.
 
 ## References
