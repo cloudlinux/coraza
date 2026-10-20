@@ -4,7 +4,7 @@
 - **Date:** 2026-10-16 (expected; update before merge)
 - **Version:** unreleased (post-v3.8.1-cl7)
 - **PR:** [#31](https://github.com/cloudlinux/coraza/pull/31) (expected number; update before merge)
-- **Issue(s):** No linked issue (CloudLinux DEF-55803, enabling `SecRxPreFilter On` in wafd)
+- **Issue(s):** No linked issue
 - **Deciders:** Gabriel Grigoras (CloudLinux)
 - **Category:** Feature
 
