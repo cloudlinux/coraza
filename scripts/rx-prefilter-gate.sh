@@ -14,7 +14,7 @@
 #            about 10 minutes), then a self-check of the audit-log replay (writes a log with the
 #            ruleset and replays it)
 #   --audit-logs PATH   in any mode, replays the requests in these JSON audit logs (a file or a
-#            directory, *.gz unzipped; wafd needs SecAuditLogParts with C to log the body) through
+#            directory, *.gz unzipped; the log needs SecAuditLogParts with C to hold the body) through
 #            the ruleset, Off against On (TestRxPreFilterAuditReplay). The report has request lines.
 #
 # Exit status: 0 when Off and On agree everywhere, 1 on any disagreement or when a check could
@@ -26,6 +26,9 @@
 #   CORAZA_PREFILTER_SAMPLES         generated inputs per pattern (default 300)
 #   MIN_PATTERNS                     fail if the ruleset yields fewer @rx patterns (default 100), so
 #                                    a ruleset that failed to unpack cannot pass by being empty
+#   CORAZA_RX_PARITY_REMOVE_IDS      rule ids (commas or spaces) removed from the ruleset in the
+#                                    replays: rules whose match is random, which differ between any
+#                                    two runs
 set -uo pipefail
 
 MODE=pattern

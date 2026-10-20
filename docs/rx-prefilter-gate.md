@@ -29,7 +29,8 @@ The ruleset build should run `pattern` on every candidate ruleset: it is cheap e
 on each daily rule edit, before the ruleset is published. The workflow `rx-prefilter-gate.yml` runs `full` on every `v*-cl*`
 tag and can be started by hand. It fetches the ruleset from the https URL in the repository
 variable `RX_PREFILTER_RULESET_URL` (a zip of the `*.conf` files; `RX_PREFILTER_RULESET_SHA256`
-pins it) or from the `ruleset_url` input, and fails when it has neither.
+pins it) or from the `ruleset_url` input, and fails when it has neither. The repository variable
+`RX_PREFILTER_REMOVE_IDS` sets `CORAZA_RX_PARITY_REMOVE_IDS` (see Knobs).
 
 ## Replaying production requests
 
@@ -38,9 +39,9 @@ pins it) or from the `ruleset_url` input, and fails when it has neither.
 `DetectionOnly` and in `On`. A request is replayed as logged: method, URI, headers and the
 body. The body is in the log only with part C in `SecAuditLogParts`. Part C is the request
 body, passwords included, in a plain-text log: switch it on only on the servers picked for the
-replay, for the length of the run, and delete those logs afterwards. wafd keeps only the first
-4 KiB of a body, and the Imunify ruleset removes part C itself (`ctl:auditLogParts=ABFHZ`) for
-file uploads and for requests whose body did not parse. The summary counts the requests logged
+replay, for the length of the run, and delete those logs afterwards. The integration may log
+only the start of a body, and a ruleset can remove part C itself (`ctl:auditLogParts`), for
+example for file uploads and for requests whose body did not parse. The summary counts the requests logged
 without a body and with only the start of one; Off and On are still compared on what survived,
 but file-upload rules cannot be replayed from audit logs (the pattern check and the
 end-to-end replay cover them). The replay also reports how many of the rules the log lists
@@ -64,5 +65,8 @@ A pattern the generator cannot build matching inputs for is compared on fewer in
 ## Knobs
 
 `CORAZA_PREFILTER_SAMPLES` (inputs per pattern, default 300), `MIN_PATTERNS` (fail if fewer
-patterns than this are found, default 100), `OUT` (output directory). `--limit N` shortens the
+patterns than this are found, default 100), `OUT` (output directory),
+`CORAZA_RX_PARITY_REMOVE_IDS` (rule ids, separated by commas or spaces, removed from the ruleset
+in the replays: a rule whose match is random, such as one that samples traffic by `UNIQUE_ID`,
+fires on a different request in every run and would show as a difference between Off and On). `--limit N` shortens the
 replay to the first N corpus requests for a smoke run.

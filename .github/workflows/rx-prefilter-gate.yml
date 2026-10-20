@@ -59,6 +59,7 @@ jobs:
       - name: Prefilter gate
         env:
           MODE: ${{ github.event.inputs.mode || 'full' }}
+          CORAZA_RX_PARITY_REMOVE_IDS: ${{ vars.RX_PREFILTER_REMOVE_IDS }}
         run: bash scripts/rx-prefilter-gate.sh --rules build/ruleset --mode "$MODE"
       - name: Summary
         if: always()

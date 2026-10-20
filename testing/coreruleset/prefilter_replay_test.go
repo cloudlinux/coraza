@@ -232,9 +232,9 @@ func replayLoad(t *testing.T, path string, limit int) ([]replayRequest, replaySt
 			if len(r.logged) > 0 {
 				st.withLoggedRules++
 			}
-			// The Content-Length the log carries says whether the whole body is there. The
-			// Imunify ruleset removes part C itself (ctl:auditLogParts=ABFHZ) for file uploads
-			// and for requests whose body did not parse, and wafd parks only the start of a body.
+			// The Content-Length the log carries says whether the whole body is there. A
+			// ruleset can remove part C itself (ctl:auditLogParts) for some requests, and the
+			// integration may log only the start of a body.
 			if cl := replayContentLength(rq.Headers); cl > 0 {
 				switch {
 				case rq.Body == "":
@@ -309,7 +309,7 @@ func replayGroundTruth(reqs []replayRequest, res []parityResult) (text string, f
 	fmt.Fprintf(&sb, "   requests with their whole body whose log lists rules: %d; replayed with the prefilter off, all of them matched again: %d, some: %d, none: %d\n",
 		withLog, full, partial, none)
 	if skipped > 0 {
-		fmt.Fprintf(&sb, "   not compared with the log, because it lacks all of the body: %d (the Imunify ruleset removes part C for file uploads and body parse errors)\n", skipped)
+		fmt.Fprintf(&sb, "   not compared with the log, because it lacks all of the body: %d (the ruleset or the integration left the body out)\n", skipped)
 	}
 	if len(top) > 0 {
 		parts := make([]string, len(top))
@@ -420,7 +420,7 @@ func TestRxPreFilterAuditReplay(t *testing.T) {
 	}
 }
 
-// TestRxPreFilterAuditReplaySelfCheck writes an audit log the way wafd does (JSON, part C), with
+// TestRxPreFilterAuditReplaySelfCheck writes a JSON audit log with part C, with
 // the ruleset under test and the CRS corpus as traffic, then replays it. The rules the log lists
 // must match again when the log is replayed through the same ruleset, so a replay that
 // misreads what Coraza writes fails here instead of passing on an empty or garbled input.
@@ -440,13 +440,16 @@ func TestRxPreFilterAuditReplaySelfCheck(t *testing.T) {
 	if logPath == "" {
 		logPath = filepath.Join(t.TempDir(), "audit.log")
 	}
-	waf, err := coraza.NewWAF(coraza.NewWAFConfig().
+	cfg := coraza.NewWAFConfig().
 		WithDirectives("SecRuleEngine DetectionOnly").
 		WithDirectives(parityRulesBase).
 		WithDirectives(fmt.Sprintf("SecTmpDir %s\nSecUploadDir %s", os.TempDir(), os.TempDir())).
 		WithDirectives("SecAuditEngine On\nSecAuditLogParts ABCHZ\nSecAuditLogFormat JSON\nSecAuditLogType Serial\nSecAuditLog " + logPath).
-		WithDirectives("Include " + filepath.ToSlash(filepath.Join(abs, "*.conf"))).
-		WithDirectives("SecRuleRemoveById " + parityRandomRule))
+		WithDirectives("Include " + filepath.ToSlash(filepath.Join(abs, "*.conf")))
+	if ids := parityRemoveIDs(); ids != "" {
+		cfg = cfg.WithDirectives("SecRuleRemoveById " + ids)
+	}
+	waf, err := coraza.NewWAF(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

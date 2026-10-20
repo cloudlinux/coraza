@@ -16,6 +16,7 @@
 // CORAZA_RX_PARITY_LIMIT=<n>                only the first n distinct FTW requests (smoke run)
 // CORAZA_RX_PARITY_CARRIERS=a,b             only these carriers (see parityBuild)
 // CORAZA_RX_PARITY_REPORT=<file>            also write the report there
+// CORAZA_RX_PARITY_REMOVE_IDS=<ids>         remove these rules from the ruleset (see parityRemoveIDs)
 //
 // The bundled CRS always runs, at paranoia level 4 in DetectionOnly (what the FTW run uses),
 // so every rule gets to run and none of them is hidden behind an earlier block.
@@ -79,8 +80,8 @@ SecAction "id:900005,\
   setvar:tx.combined_file_sizes=65535"
 `
 
-// parityRulesBase is what wafd's modsecurity.conf sets that shapes rule evaluation, minus
-// logging, the engine mode and SecRxPreFilter, which the test sets.
+// parityRulesBase is the part of a typical deployment's configuration that shapes rule
+// evaluation, minus logging, the engine mode and SecRxPreFilter, which the test sets.
 const parityRulesBase = `
 SecRequestBodyAccess On
 SecRequestBodyLimitAction ProcessPartial
@@ -88,8 +89,16 @@ SecArgumentSeparator &
 SecCookieFormat 0
 `
 
-// parityRandomRule is the id of the Imunify ruleset's one rule whose match is random.
-const parityRandomRule = "33340"
+// parityRemoveIDs is the SecRuleRemoveById argument CORAZA_RX_PARITY_REMOVE_IDS gives, ids
+// separated by commas or spaces, or "" when it names none. It is for rules whose match is
+// random, such as a rule that samples traffic by UNIQUE_ID: those fire on a different request
+// in every run, so they differ between Off and On for reasons that have nothing to do with
+// the prefilter.
+func parityRemoveIDs() string {
+	return strings.Join(strings.FieldsFunc(os.Getenv("CORAZA_RX_PARITY_REMOVE_IDS"), func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t' || r == '\n'
+	}), " ")
+}
 
 var parityWords = strings.Fields(`the quick brown fox jumps over lazy dog river mountain garden window kitchen morning
 evening coffee summer winter forest yellow purple silver paper pencil bridge harbor island meadow market village
@@ -403,7 +412,7 @@ func parityPost(base, carrier, uri, contentType string, body []byte) parityReque
 //	post-form    the payload as an urlencoded POST body
 //	post-json    the payload's parameters as members of a JSON POST body
 //	post-padded  the form body between two ~14 KB runs of benign parameters, ~28 KB in
-//	             all: the size at which wafd treats a request as heavy
+//	             all
 //	echo         the form body, and the payload echoed back in the response body
 func parityBuild(bases []parityBase, only map[string]bool) []parityRequest {
 	rnd := rand.New(rand.NewSource(1)) //nolint:gosec // reproducible test input, not security
@@ -488,17 +497,16 @@ func parityRulesWAF(t *testing.T, dir, engine, mode string) coraza.WAF {
 	if err != nil {
 		t.Fatal(err)
 	}
-	waf, err := coraza.NewWAF(coraza.NewWAFConfig().
+	cfg := coraza.NewWAFConfig().
 		WithDirectives("SecRuleEngine " + engine).
 		WithDirectives(parityRulesBase).
 		WithDirectives(fmt.Sprintf("SecTmpDir %s\nSecUploadDir %s", os.TempDir(), os.TempDir())).
 		WithDirectives("SecRxPreFilter " + mode).
-		WithDirectives("Include " + filepath.ToSlash(filepath.Join(abs, "*.conf"))).
-		// Rule 33340 of the Imunify ruleset samples traffic: it matches when the md5 of the
-		// random UNIQUE_ID ends in "fff", one transaction in 4096, so it fires on a different
-		// request in every run. The first run of this test showed it as the only difference,
-		// in both directions. It has nothing to do with the prefilter, so it is removed.
-		WithDirectives("SecRuleRemoveById " + parityRandomRule))
+		WithDirectives("Include " + filepath.ToSlash(filepath.Join(abs, "*.conf")))
+	if ids := parityRemoveIDs(); ids != "" {
+		cfg = cfg.WithDirectives("SecRuleRemoveById " + ids)
+	}
+	waf, err := coraza.NewWAF(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -810,7 +818,7 @@ func maxFloat(a, b float64) float64 {
 }
 
 // parityOfflineDNS makes every DNS lookup of the process fail at once and returns the function
-// that puts the resolver back. The Imunify ruleset queries live DNS blocklists (@rbl). Answers
+// that puts the resolver back. A ruleset can query live DNS blocklists (@rbl). Answers
 // change and offline they time out, so every @rbl rule reports "not listed", the same way in
 // the run with the prefilter off and the one with it on.
 func parityOfflineDNS() (restore func()) {
@@ -871,7 +879,7 @@ func TestRxPreFilterParity(t *testing.T) {
 				build: func(mode string) coraza.WAF { return parityRulesWAF(t, dir, "DetectionOnly", mode) },
 			},
 			config{
-				name:  "ruleset " + dir + ", SecRuleEngine On (what wafd runs)",
+				name:  "ruleset " + dir + ", SecRuleEngine On",
 				build: func(mode string) coraza.WAF { return parityRulesWAF(t, dir, "On", mode) },
 			})
 	}
