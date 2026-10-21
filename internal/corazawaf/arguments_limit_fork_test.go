@@ -16,7 +16,7 @@ import (
 // top of upstream's ARGUMENTS_LIMIT_REACHED, the fork raises REQBODY_ERROR
 // (RES_BODY_ERROR on the response path) with a message naming the limit, so a
 // deployment whose rules only know the error variables still rejects the
-// request (DEF-51539, DEF-57620).
+// request.
 
 func oversizedJSONBody(members int) string {
 	body := strings.Builder{}
