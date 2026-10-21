@@ -7,10 +7,13 @@ package operators
 
 import (
 	"fmt"
+	"math"
+	"math/rand/v2"
 	"regexp"
 	"regexp/syntax"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"unicode/utf8"
 
 	"rsc.io/binaryregexp"
@@ -47,6 +50,17 @@ type rx struct {
 	prefilter    func(string) bool // returns true if regex might match; nil = no prefilter
 	exactMatch   string            // non-empty: pattern is ^literal$; skip NFA entirely
 	exactMatchCI bool              // true when exactMatch uses case-insensitive comparison
+
+	// Verification of the prefilter (SecRxPreFilterVerify). When the prefilter
+	// decides the regex cannot match, a sample of those inputs is run through
+	// the regex anyway. A match means the prefilter is wrong: the operator
+	// reports it once through onMiss and from then on does not use the
+	// prefilter, minLen or exactMatch (off), so the rule behaves as with
+	// SecRxPreFilter Off. A new rule, which a ruleset reload builds, starts again.
+	verifyAll   bool        // every decision is checked
+	verifyBelow uint32      // else: checked when a random uint32 is below this; 0 never checks
+	onMiss      func()      // nil: nobody is told
+	off         atomic.Bool // set after a miss
 }
 
 // rxCompiled holds all compile-time artifacts for a regex pattern so they can
@@ -119,31 +133,81 @@ func newRX(options plugintypes.OperatorOptions) (plugintypes.Operator, error) {
 		return nil, err
 	}
 	c := compiled.(*rxCompiled)
-	return &rx{
+	o := &rx{
 		re:           c.re,
 		minLen:       c.minLen,
 		prefilter:    c.prefilter,
 		exactMatch:   c.exactMatch,
 		exactMatchCI: c.exactMatchCI,
-	}, nil
+	}
+	if options.RxPreFilterEnabled {
+		o.verifyAll, o.verifyBelow = verifyThreshold(options.RxPreFilterVerify)
+		o.onMiss = options.RxPreFilterMiss
+	}
+	return o, nil
+}
+
+// verifyThreshold turns the probability p, from 0 to 1, of checking a prefilter
+// decision into the two fields rx uses: p of 1 or more checks every decision,
+// p of 0 or less (or not a number) none, and any other p checks
+// a decision when a random uint32 is below p * 2^32.
+func verifyThreshold(p float64) (all bool, below uint32) {
+	switch {
+	case math.IsNaN(p) || p <= 0:
+		return false, 0
+	case p >= 1:
+		return true, 0
+	default:
+		return false, uint32(p * (1 << 32))
+	}
+}
+
+// verifyNow reports whether this prefilter decision is one of those checked.
+func (o *rx) verifyNow() bool {
+	switch {
+	case o.verifyAll:
+		return true
+	case o.verifyBelow == 0:
+		return false
+	default:
+		return rand.Uint32() < o.verifyBelow
+	}
+}
+
+// miss records that the prefilter decided against an input the regex matches. The
+// first call turns the prefilter off for this rule and tells onMiss; the later ones
+// (another goroutine got here at the same time) do nothing.
+func (o *rx) miss() {
+	if o.off.CompareAndSwap(false, true) && o.onMiss != nil {
+		o.onMiss()
+	}
 }
 
 func (o *rx) Evaluate(tx plugintypes.TransactionState, value string) bool {
-	// Prefiltering evaluation is performed here, skipping regex evaluation for clearly non-matching inputs.
-	if len(value) < o.minLen {
-		return false
-	}
-	if o.prefilter != nil && !o.prefilter(value) {
-		return false
-	}
-	// Gap 2: exact-match bypass for patterns like ^Upload$ — skip the NFA entirely.
-	// The \n guard protects against multi-line inputs where (?m)$ matches
-	// before a newline (e.g. "Upload\nmore" would satisfy (?sm)^Upload$).
-	if o.exactMatch != "" && !strings.ContainsRune(value, '\n') {
-		if o.exactMatchCI {
-			return strings.EqualFold(value, o.exactMatch)
+	if !o.off.Load() {
+		// Prefiltering evaluation is performed here, skipping regex evaluation for clearly non-matching inputs.
+		// When a skip is verified and the regex matches after all, miss() has turned the
+		// prefilter off and the code below evaluates the input as a rule without one would,
+		// so the request still gets the right answer.
+		if len(value) < o.minLen || (o.prefilter != nil && !o.prefilter(value)) {
+			if !o.verifyNow() || !o.re.MatchString(value) {
+				return false
+			}
+			o.miss()
+		} else if o.exactMatch != "" && !strings.ContainsRune(value, '\n') {
+			// Gap 2: exact-match bypass for patterns like ^Upload$ — skip the NFA entirely.
+			// The \n guard protects against multi-line inputs where (?m)$ matches
+			// before a newline (e.g. "Upload\nmore" would satisfy (?sm)^Upload$).
+			equal := value == o.exactMatch
+			if o.exactMatchCI {
+				equal = strings.EqualFold(value, o.exactMatch)
+			}
+			// Only a "not equal" is a decision the regex could contradict.
+			if equal || !o.verifyNow() || !o.re.MatchString(value) {
+				return equal
+			}
+			o.miss()
 		}
-		return value == o.exactMatch
 	}
 
 	if tx.Capturing() {

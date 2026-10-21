@@ -172,6 +172,17 @@ type WAF struct {
 	// literal pre-filtering. Set by the SecRxPreFilter directive.
 	RxPreFilterEnabled bool
 
+	// RxPreFilterVerify is the probability, from 0 to 1, that an @rx operator
+	// runs its regular expression anyway when the prefilter says the input
+	// cannot match. Set by the SecRxPreFilterVerify directive. Like
+	// RxPreFilterEnabled it applies to the rules parsed after it is set.
+	RxPreFilterVerify float64
+
+	// RxPreFilterObserver is called with the ID of a rule whose prefilter was
+	// found to reject an input the regular expression matches. The ID is the
+	// chain starter's for a chained rule. It receives no request data.
+	RxPreFilterObserver func(ruleID int)
+
 	memoizerID uint64
 	memoizer   *memoize.Memoizer
 	closeOnce  gosync.Once
