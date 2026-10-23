@@ -1948,7 +1948,7 @@ func (tx *Transaction) auditLogCollectFiles() []plugintypes.AuditLogTransactionR
 // transformationCacheKeepLen is the largest number of cached transformations a
 // transaction keeps the map for. A request with many arguments grows the map,
 // and a Go map does not shrink when cleared, so a larger one is replaced.
-const transformationCacheKeepLen = 1024
+const transformationCacheKeepLen = 2048
 
 // releaseTransformationCache empties the transformation cache, replacing the
 // map when it grew past transformationCacheKeepLen.

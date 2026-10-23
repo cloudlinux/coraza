@@ -121,7 +121,7 @@ SecRule TX:matched_times2 "@eq 2" "id:12, phase:1, pass, log, t:none"
 // (transformationCacheKeepLen in internal/corazawaf), so the map is replaced at the end of the phase.
 func manyArgsBody() string {
 	var b strings.Builder
-	for i := 0; i < 1500; i++ {
+	for i := 0; i < 3000; i++ {
 		fmt.Fprintf(&b, "p%d=VALUE&", i)
 	}
 	b.WriteString("x=ATTACK")

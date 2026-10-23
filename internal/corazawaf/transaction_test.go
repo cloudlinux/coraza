@@ -2993,9 +2993,9 @@ func TestTransformationCacheReleasedAfterPhase(t *testing.T) {
 		{name: "few arguments keep the map", args: 10, phase: types.PhaseRequestHeaders, wantSameMap: true},
 		{name: "arguments at the limit keep the map", args: transformationCacheKeepLen, phase: types.PhaseRequestHeaders, wantSameMap: true},
 		{name: "many arguments replace the map", args: transformationCacheKeepLen + 1, phase: types.PhaseRequestHeaders, wantSameMap: false},
-		{name: "request body phase", args: 2000, phase: types.PhaseRequestBody, wantSameMap: false},
-		{name: "phase cut short by the context", args: 2000, phase: types.PhaseRequestBody, cancel: true, wantSameMap: false},
-		{name: "logging phase", args: 2000, phase: types.PhaseLogging, wantSameMap: false},
+		{name: "request body phase", args: 2 * transformationCacheKeepLen, phase: types.PhaseRequestBody, wantSameMap: false},
+		{name: "phase cut short by the context", args: 2 * transformationCacheKeepLen, phase: types.PhaseRequestBody, cancel: true, wantSameMap: false},
+		{name: "logging phase", args: 2 * transformationCacheKeepLen, phase: types.PhaseLogging, wantSameMap: false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

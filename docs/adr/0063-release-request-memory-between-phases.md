@@ -3,7 +3,7 @@
 - **Status:** proposed
 - **Date:** 2026-10-23 (expected; update before merge)
 - **Version:** unreleased (post-v3.8.1-cl7)
-- **PR:** not opened yet (update before merge)
+- **PR:** [#33](https://github.com/cloudlinux/coraza/pull/33)
 - **Issue(s):** No linked issue (CloudLinux DEF-55803 follow-up, Cloudways memory spikes on large request bodies)
 - **Deciders:** Ruslan Shmelev (CloudLinux)
 - **Category:** Perf
@@ -27,8 +27,10 @@ base64 3.6 MB). An allowed 0.5 MiB body held 9–16 MiB, and 8 concurrent ones h
 
 With the same ruleset, phase 2 creates about 100 cache entries per argument: 198 for
 a GET of `/`, 314 for a GET with 3 query arguments, 537 for a wp-login POST, 3002 for
-a 30-field form and 24,861 for a 200-field form. A Go map does not shrink when it is
-cleared, so `clear()` in `Close()` left a pooled transaction holding the buckets of
+a 30-field form and 24,861 for a 200-field form. CRS v4.25 creates more: 47 for a GET
+of `/`, 721 for a GET with 3 arguments and browser headers, 1205 for a 5-field
+wp-login POST (1479 at paranoia level 4), 2392 for a 10-field form and 8935 for a
+30-field form. A Go map does not shrink when it is cleared, so `clear()` in `Close()` left a pooled transaction holding the buckets of
 the largest request it had served.
 
 **Request body buffer.** `BodyBuffer.Reset()` called `bytes.Buffer.Reset()`, which
@@ -72,10 +74,12 @@ Chosen: **release at the end of every phase, with a size threshold.**
   interrupts, when `skipAfter` ends the phase, and when the phase is cut short by a
   done context (`ErrPhaseCanceled`, DEF-57619).
 - `releaseTransformationCache` clears a map with at most
-  `transformationCacheKeepLen` (1024) entries and replaces a larger one with a new
-  map. 1024 is above every GET and small POST measured above (at most 537 entries), so
-  those keep reusing the map, and below any form of about 10 fields or more, whose
-  buckets are not kept. `Close()` calls the same helper.
+  `transformationCacheKeepLen` (2048) entries and replaces a larger one with a new
+  map. 2048 is above every GET and small POST measured above under both rulesets (at
+  most 1479 entries, wp-login under CRS PL4), so those keep reusing the map, and below
+  a 30-field form under either ruleset, whose buckets are not kept. A first draft used
+  1024: under CRS it rebuilt the map for every wp-login POST, +92% bytes allocated per
+  request. `Close()` calls the same helper.
 - `BodyBuffer.Reset` keeps a buffer up to `bodyBufferKeepCap` (64 KiB) and replaces a
   larger one with a new `bytes.Buffer`. The temporary file path is unchanged.
 
@@ -100,12 +104,12 @@ been reviewed yet.
   longer outlive their request in `WAF.txPool`. Tests:
   - `TestTransformationCacheReleasedAfterPhase`: the cache is empty after each phase,
     including an interrupted phase and a phase cut short by a done context. The map is
-    kept at 1024 entries and replaced at 1025.
+    kept at 2048 entries and replaced at 2049.
   - `TestCloseReleasesLargeRequestBody`, `TestBodyBufferResetReleasesLargeBuffer`.
   - The `transformations_cache_release.yaml` engine profile checks detection. A
     transforming rule matches in every phase, an identical second rule in the same
     phase matches (a cache hit), and raw `t:none` rules in later phases do not see the
-    transformed values of earlier ones. It runs for a GET, and for a POST with 1500
+    transformed values of earlier ones. It runs for a GET, and for a POST with 3000
     arguments, so phase 2 crosses the threshold.
 - **Negative / follow-up:** A request that crosses a threshold allocates a new map or
   buffer on the next transaction that reuses it. The parsed argument collections (ARGS
