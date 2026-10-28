@@ -28,6 +28,19 @@ var _ = profile.RegisterProfile(profile.Profile{
 				},
 			},
 		},
+		{
+			Title: "rule collection holds the matching rule's metadata",
+			Stages: []profile.Stage{
+				{
+					Stage: profile.SubStage{
+						Input: profile.StageInput{URI: "/?a=abc"},
+						Output: profile.ExpectedOutput{
+							TriggeredRules: []int{301, 302, 303},
+						},
+					},
+				},
+			},
+		},
 	},
 	Rules: `
 SecAction "id:1,pass,setvar:'tx.inbound_anomaly_score_threshold=5',setvar:'tx.blocking_paranoia_level=1'"
@@ -39,5 +52,10 @@ SecRule TX:inbound_anomaly_score_threshold "@eq %{tx.inbound_anomaly_ScorE_thres
 SecRule TX:blocking_paranoia_level "@eq 1" "id:200,log,pass"
 
 SecRule TX:executing_paranoia_level "@lt %{tx.blocking_paranoia_level}" "id:901500,phase:1,log"
+
+SecAction "id:300,phase:1,pass,nolog,msg:'stale'"
+SecRule ARGS:a "@rx ^(\w+)$" "id:301,phase:1,pass,capture,msg:'caught %{tx.1}',setvar:'tx.m=%{rule.msg}',setvar:'tx.i=%{rule.id}'"
+SecRule TX:m "@streq caught abc" "id:302,phase:1,pass,log"
+SecRule TX:i "@streq 301" "id:303,phase:1,pass,log"
 `,
 })

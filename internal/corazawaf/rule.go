@@ -199,22 +199,10 @@ func (r *Rule) doEvaluate(logger debuglog.Logger, phase types.RulePhase, tx *Tra
 	logger.Debug().Msg("Evaluating rule")
 	defer logger.Debug().Msg("Finished rule evaluation")
 
-	ruleCol := tx.variables.rule
-	ruleCol.SetIndex("id", 0, r.LogID())
-	if r.Msg != nil {
-		// Expand the message using the current TX variables so that %{rule.msg} in setvar actions
-		// returns the fully expanded message, matching ModSecurity behavior.
-		ruleCol.SetIndex("msg", 0, r.Msg.Expand(tx))
-	}
-	ruleCol.SetIndex("rev", 0, r.Rev_)
-	if r.LogData != nil {
-		// Same expansion for logdata, matching ModSecurity behavior for %{rule.logdata}.
-		ruleCol.SetIndex("logdata", 0, r.LogData.Expand(tx))
-	}
-	ruleCol.SetIndex("severity", 0, r.Severity_.String())
 	// SecMark and SecAction uses nil operator
 	if r.operator == nil {
 		logger.Debug().Msg("Forcing rule to match")
+		r.setRuleVariables(tx)
 		md := &corazarules.MatchData{}
 		if r.ParentID_ != noID || r.MultiMatch {
 			// In order to support Msg and LogData for inner rules, we need to expand them now
@@ -289,6 +277,11 @@ func (r *Rule) doEvaluate(logger debuglog.Logger, phase types.RulePhase, tx *Tra
 
 					match := r.executeOperator(carg, tx)
 					if match {
+						// Only actions and their macros read RULE, so it is filled on the
+						// first match instead of on every evaluation.
+						if len(matchedValues) == 0 {
+							r.setRuleVariables(tx)
+						}
 						mr := &corazarules.MatchData{
 							Variable_:   arg.Variable(),
 							Key_:        arg.Key(),
@@ -411,6 +404,24 @@ func (r *Rule) doEvaluate(logger debuglog.Logger, phase types.RulePhase, tx *Tra
 		}
 	}
 	return matchedValues
+}
+
+// setRuleVariables fills the RULE collection with r's metadata, expanding msg and
+// logdata against the transaction's current state.
+func (r *Rule) setRuleVariables(tx *Transaction) {
+	ruleCol := tx.variables.rule
+	ruleCol.SetIndex("id", 0, r.LogID())
+	if r.Msg != nil {
+		// Expand the message using the current TX variables so that %{rule.msg} in setvar actions
+		// returns the fully expanded message, matching ModSecurity behavior.
+		ruleCol.SetIndex("msg", 0, r.Msg.Expand(tx))
+	}
+	ruleCol.SetIndex("rev", 0, r.Rev_)
+	if r.LogData != nil {
+		// Same expansion for logdata, matching ModSecurity behavior for %{rule.logdata}.
+		ruleCol.SetIndex("logdata", 0, r.LogData.Expand(tx))
+	}
+	ruleCol.SetIndex("severity", 0, r.Severity_.String())
 }
 
 func (r *Rule) transformMultiMatchArg(arg types.MatchData) ([]string, []error) {
