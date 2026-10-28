@@ -744,27 +744,29 @@ func (tx *Transaction) GetField(rv ruleVariableParams) []types.MatchData {
 		matches = col.FindAll()
 	}
 
-	// in the most common scenario filteredMatches length will be
-	// the same as matches length, so we avoid allocating per result.
-	// We reuse the matches slice to store filtered results avoiding extra allocation.
-	filteredCount := 0
-	for _, c := range matches {
-		isException := false
-		lkey := strings.ToLower(c.Key())
-		for _, ex := range rv.Exceptions {
-			// KeyStr is only meaningful without KeyRx: a regex exception from ctl
-			// carries an empty KeyStr, which would otherwise match a key named "".
-			if (ex.KeyRx != nil && ex.KeyRx.MatchString(lkey)) || (ex.KeyRx == nil && (ex.KeyStr == "" || strings.ToLower(ex.KeyStr) == lkey)) {
-				isException = true
-				break
+	if len(rv.Exceptions) > 0 {
+		// in the most common scenario filteredMatches length will be
+		// the same as matches length, so we avoid allocating per result.
+		// We reuse the matches slice to store filtered results avoiding extra allocation.
+		filteredCount := 0
+		for _, c := range matches {
+			isException := false
+			lkey := strings.ToLower(c.Key())
+			for _, ex := range rv.Exceptions {
+				// KeyStr is only meaningful without KeyRx: a regex exception from ctl
+				// carries an empty KeyStr, which would otherwise match a key named "".
+				if (ex.KeyRx != nil && ex.KeyRx.MatchString(lkey)) || (ex.KeyRx == nil && (ex.KeyStr == "" || strings.ToLower(ex.KeyStr) == lkey)) {
+					isException = true
+					break
+				}
+			}
+			if !isException {
+				matches[filteredCount] = c
+				filteredCount++
 			}
 		}
-		if !isException {
-			matches[filteredCount] = c
-			filteredCount++
-		}
+		matches = matches[:filteredCount]
 	}
-	matches = matches[:filteredCount]
 
 	if rv.Count {
 		count := len(matches)

@@ -36,5 +36,11 @@ func TestSingle(t *testing.T) {
 		t.Errorf("want %s, have %s", want, have)
 	}
 
-	assertValuesMatch(t, c.FindAll(), "bear")
+	bear := c.FindAll()
+	assertValuesMatch(t, bear, "bear")
+
+	c.Set("wolf")
+	assertValuesMatch(t, c.FindAll(), "wolf")
+	// A result read before Set keeps the value it was read with.
+	assertValuesMatch(t, bear, "bear")
 }
