@@ -16,6 +16,8 @@ import (
 type Single struct {
 	data     string
 	variable variables.RuleVariable
+	// matches is FindAll's result for data, built when data changes.
+	matches []types.MatchData
 }
 
 var _ collection.Single = &Single{}
@@ -27,13 +29,16 @@ func NewSingle(variable variables.RuleVariable) *Single {
 	}
 }
 
+// FindAll returns the value as a single match. The result is shared by every
+// FindAll until the value changes, so callers must not modify it.
 func (c *Single) FindAll() []types.MatchData {
-	return []types.MatchData{
-		&corazarules.MatchData{
+	if c.matches == nil || c.matches[0].Value() != c.data {
+		c.matches = []types.MatchData{&corazarules.MatchData{
 			Variable_: c.variable,
 			Value_:    c.data,
-		},
+		}}
 	}
+	return c.matches
 }
 
 func (c *Single) Get() string {
@@ -50,6 +55,7 @@ func (c *Single) Name() string {
 
 func (c *Single) Reset() {
 	c.data = ""
+	c.matches = nil
 }
 
 func (c *Single) Format(res *strings.Builder) {
