@@ -2999,6 +2999,9 @@ func TestTransformationCacheReleasedAfterPhase(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			if multiphaseEvaluation && tc.phase != types.PhaseRequestHeaders {
+				t.Skip("multiphase evaluation runs an ARGS_GET rule in phase 1 whatever its phase")
+			}
 			waf := NewWAF()
 			waf.ArgumentLimit = 4 * transformationCacheKeepLen
 			lowercase, err := transformations.GetTransformation("lowercase")
