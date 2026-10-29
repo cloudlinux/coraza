@@ -31,6 +31,18 @@ type OperatorOptions struct {
 	// RxPreFilterEnabled controls whether the @rx operator uses
 	// literal pre-filtering. Set by the SecRxPreFilter directive.
 	RxPreFilterEnabled bool
+
+	// RxPreFilterVerify is the probability, from 0 to 1, that the @rx operator
+	// runs its regular expression anyway when the prefilter says the input
+	// cannot match. A match proves the prefilter wrong. Set by the
+	// SecRxPreFilterVerify directive.
+	RxPreFilterVerify float64
+
+	// RxPreFilterMiss is called when such a check finds a match. The operator
+	// calls it at most once and then stops using its prefilter. It carries no
+	// request data. It is nil unless RxPreFilterEnabled is set and
+	// RxPreFilterVerify is above zero.
+	RxPreFilterMiss func()
 }
 
 // Operator interface is used to define rule @operators

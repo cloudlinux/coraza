@@ -436,6 +436,18 @@ func TestDirectives(t *testing.T) {
 		"SecAuditLog": {
 			{"", expectErrorOnDirective},
 		},
+		"SecRxPreFilterVerify": {
+			{"", expectErrorOnDirective},
+			{"x", expectErrorOnDirective},
+			{"-1", expectErrorOnDirective},
+			{"101", expectErrorOnDirective},
+			{"NaN", expectErrorOnDirective},
+			{"Inf", expectErrorOnDirective},
+			{"0", func(w *corazawaf.WAF) bool { return w.RxPreFilterVerify == 0 }},
+			{"1", func(w *corazawaf.WAF) bool { return w.RxPreFilterVerify == 0.01 }},
+			{"0.5", func(w *corazawaf.WAF) bool { return w.RxPreFilterVerify == 0.005 }},
+			{"100", func(w *corazawaf.WAF) bool { return w.RxPreFilterVerify == 1 }},
+		},
 		"SecArgumentsLimit": {
 			{"", expectErrorOnDirective},
 			{"0", expectErrorOnDirective},
