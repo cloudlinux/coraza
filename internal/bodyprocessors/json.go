@@ -66,7 +66,7 @@ func (js *jsonBodyProcessor) ProcessRequest(reader io.Reader, v plugintypes.Tran
 
 	// Arguments past SecArgumentsLimit were dropped. ARGUMENTS_LIMIT_REACHED is
 	// set above; the error lets the transaction raise REQBODY_ERROR as well, the
-	// way the other body processors of the fork report a truncation (DEF-51539).
+	// way the other body processors of the fork report a truncation.
 	if truncated {
 		return ErrArgumentsLimit
 	}

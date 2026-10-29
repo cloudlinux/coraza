@@ -188,7 +188,7 @@ func TestPrefilterNeverCausesFalseNegatives(t *testing.T) {
 		{`^(?:a|.)bc.*$`, "xyz", false},
 
 		// Regression: trie reconstruction glued a literal that follows a star onto
-		// the common prefix. The lab ruleset's XSS rule starts with
+		// the common prefix. An XSS rule can start with
 		// &#0*60;|&#x0*3c;|&lt;..., which the parser factors into
 		// &(?:#(?:0*60;|x0*3c;)|lt;|...); the prefilter required "#60;" and
 		// "#3c;", neither of which is in "&#060;" or "&#x3c;", and rejected the

@@ -179,7 +179,7 @@ func prefilterDisagreement(pattern string, samples int, tx plugintypes.Transacti
 // skip the regular expression for an input it cannot match.
 func TestPrefilterAgreesWithRegexOnGeneratedInputs(t *testing.T) {
 	patterns := []string{
-		// Entities as the XSS rules of the Imunify360 ruleset write them: the
+		// Entities as XSS rules commonly write them: the
 		// parser factors the common "&" and "#", leaving a star in front of a
 		// literal inside a trie branch.
 		`(?:&#0*60;|&#x0*3c;|&lt;|&amp;#0*60;|&amp;#x0*3c;|&amp;lt;)(?:script|img|svg|javascript:)`,

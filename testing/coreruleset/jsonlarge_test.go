@@ -22,9 +22,8 @@ import (
 	"github.com/corazawaf/coraza/v3/types"
 )
 
-// Shapes of the large JSON bodies the lab sends (docker/compose/scenarios/
-// perf-cloudways-badday.yaml, entries 10 to 12): one object of eight members whose
-// values are all 'a', sized to the byte. They are what DEF-57621 is about.
+// Shapes of large JSON request bodies: one object of eight members whose values
+// are all 'a', sized to the byte.
 var largeJSONShapes = []struct {
 	name string
 	size int
@@ -35,7 +34,7 @@ var largeJSONShapes = []struct {
 	{"4.7MB", 4915200, 8},
 }
 
-// syntheticJSON builds the body cclient's synth_body builds for the "json" shape:
+// syntheticJSON builds a body of that shape:
 // {"k0":"aaa…","k1":"aaa…",…} of exactly size bytes.
 func syntheticJSON(size, args int) []byte {
 	const open, closing, sep = "{", "}", ","
@@ -63,9 +62,9 @@ func syntheticJSON(size, args int) []byte {
 	return []byte(sb.String())
 }
 
-// wafdBaseConfig is what wafd's modsecurity.conf sets that matters for the cost
-// of a request body, minus the logging directives.
-const wafdBaseConfig = `
+// largeJSONBaseConfig is the part of a typical deployment's configuration that
+// matters for the cost of a request body, minus the logging directives.
+const largeJSONBaseConfig = `
 SecRuleEngine On
 SecRequestBodyAccess On
 SecRequestBodyLimitAction ProcessPartial
@@ -74,13 +73,13 @@ SecCookieFormat 0
 `
 
 // largeJSONWAF builds the WAF the benchmark runs. With CORAZA_BENCH_RULES set to a
-// directory it loads that directory's *.conf, which is how the lab's ruleset
-// (the Imunify360 coraza "full" archive, unzipped) is measured. Without it the
+// directory it loads that directory's *.conf, which is how a production
+// ruleset is measured. Without it the
 // bundled CRS is used at its default paranoia level.
 func largeJSONWAF(b *testing.B) coraza.WAF {
 	b.Helper()
 	conf := coraza.NewWAFConfig().
-		WithDirectives(wafdBaseConfig).
+		WithDirectives(largeJSONBaseConfig).
 		WithDirectives(fmt.Sprintf("SecTmpDir %s\nSecUploadDir %s", os.TempDir(), os.TempDir()))
 	// Extra directives go in before the rules, which is where a setting such as
 	// SecRxPreFilter has to be to apply to them. Write a newline as \n.
@@ -198,7 +197,7 @@ func (t *ruleTimer) report(iterations int, top int) string {
 }
 
 // BenchmarkCRSLargeJSON measures one POST with a large JSON body through the whole
-// request/response cycle, per lab body shape. Profile one shape at a time:
+// request/response cycle, per body shape. Profile one shape at a time:
 //
 //	go test -run '^$' -bench 'CRSLargeJSON/4.7MB' -benchmem -cpuprofile cpu.out ./testing/coreruleset/
 //
