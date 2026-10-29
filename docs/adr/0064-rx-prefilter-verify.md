@@ -1,9 +1,9 @@
-# ADR-0063: `SecRxPreFilterVerify`, a sampled re-check of `@rx` pre-filter skips
+# ADR-0064: `SecRxPreFilterVerify`, a sampled re-check of `@rx` pre-filter skips
 
-- **Status:** proposed
-- **Date:** 2026-10-16 (expected; update before merge)
-- **Version:** unreleased (post-v3.8.1-cl7)
-- **PR:** [#31](https://github.com/cloudlinux/coraza/pull/31) (expected number; update before merge)
+- **Status:** accepted
+- **Date:** 2026-10-29
+- **Version:** unreleased (post-v3.8.1-cl8-2)
+- **PR:** [#31](https://github.com/cloudlinux/coraza/pull/31)
 - **Issue(s):** No linked issue
 - **Deciders:** Gabriel Grigoras (CloudLinux)
 - **Category:** Feature
