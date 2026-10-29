@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"unicode/utf8"
 
+	"github.com/wasilibs/go-re2/experimental"
 	"rsc.io/binaryregexp"
 
 	"github.com/corazawaf/coraza/v3/experimental/plugins/plugintypes"
@@ -45,7 +46,7 @@ import (
 // SecRule REQUEST_URI "@rx ^/api/v(\d+)" "id:182,setvar:tx.api_version=%{TX.1}"
 // ```
 type rx struct {
-	re           *regexp.Regexp
+	re           rxRegexp
 	minLen       int
 	prefilter    func(string) bool // returns true if regex might match; nil = no prefilter
 	exactMatch   string            // non-empty: pattern is ^literal$; skip NFA entirely
@@ -67,7 +68,7 @@ type rx struct {
 // be computed once and shared via memoize when the same pattern appears in
 // multiple rules.
 type rxCompiled struct {
-	re           *regexp.Regexp
+	re           rxRegexp
 	minLen       int
 	prefilter    func(string) bool
 	exactMatch   string
@@ -75,6 +76,28 @@ type rxCompiled struct {
 }
 
 var _ plugintypes.Operator = (*rx)(nil)
+
+// rxRegexp is the part of a compiled expression rx uses.
+type rxRegexp interface {
+	MatchString(string) bool
+	FindStringSubmatchIndex(string) []int
+	String() string
+}
+
+// compileRX compiles data with RE2 in Latin-1 mode, which reads the input as bytes
+// as ModSecurity's PCRE does: invalid UTF-8 cannot make a pattern fail, and a
+// counted repeat counts bytes. A pattern Latin-1 cannot express, such as one with
+// a code point above \xff, is compiled with Go's regexp instead.
+func compileRX(data string) (rxRegexp, error) {
+	if re, err := experimental.CompileLatin1(data); err == nil {
+		return re, nil
+	}
+	re, err := regexp.Compile(data)
+	if err != nil {
+		return nil, err
+	}
+	return re, nil
+}
 
 func newRX(options plugintypes.OperatorOptions) (plugintypes.Operator, error) {
 	var data string
@@ -107,7 +130,7 @@ func newRX(options plugintypes.OperatorOptions) (plugintypes.Operator, error) {
 	// must not share a compiled artifact.
 	cacheKey := fmt.Sprintf("rx:%v:%s", options.RxPreFilterEnabled, data)
 	compiled, err := memoizeDo(options.Memoizer, cacheKey, func() (any, error) {
-		re, err := regexp.Compile(data)
+		re, err := compileRX(data)
 		if err != nil {
 			return nil, err
 		}
