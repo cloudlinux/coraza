@@ -43,6 +43,10 @@ type OperatorOptions struct {
 	// request data. It is nil unless RxPreFilterEnabled is set and
 	// RxPreFilterVerify is above zero.
 	RxPreFilterMiss func()
+
+	// RxRE2 makes the @rx operator match with RE2 in Latin-1 mode instead of
+	// Go's regexp. Set by the SecRxEngine directive.
+	RxRE2 bool
 }
 
 // Operator interface is used to define rule @operators

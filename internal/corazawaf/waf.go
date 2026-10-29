@@ -183,6 +183,11 @@ type WAF struct {
 	// chain starter's for a chained rule. It receives no request data.
 	RxPreFilterObserver func(ruleID int)
 
+	// RxRE2 makes the @rx operator match with RE2 instead of Go's regexp. Set
+	// by the SecRxEngine directive; like RxPreFilterEnabled it applies to the
+	// rules parsed after it is set.
+	RxRE2 bool
+
 	memoizerID uint64
 	memoizer   *memoize.Memoizer
 	closeOnce  gosync.Once

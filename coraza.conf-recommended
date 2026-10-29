@@ -26,6 +26,13 @@ SecRxPreFilter Off
 #
 #SecRxPreFilterVerify 1
 
+# Regular expression engine of the @rx operator: stdlib (Go's regexp) or re2
+# (RE2 in Latin-1 mode, which counts bytes like ModSecurity rather than UTF-8
+# characters). Like SecRxPreFilter, it applies to the rules defined after it.
+# Warning: Experimental feature.
+#
+SecRxEngine stdlib
+
 # -- Request body handling ---------------------------------------------------
 
 # Allows Coraza to access request bodies. Without this, Coraza

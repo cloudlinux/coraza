@@ -448,6 +448,13 @@ func TestDirectives(t *testing.T) {
 			{"0.5", func(w *corazawaf.WAF) bool { return w.RxPreFilterVerify == 0.005 }},
 			{"100", func(w *corazawaf.WAF) bool { return w.RxPreFilterVerify == 1 }},
 		},
+		"SecRxEngine": {
+			{"", expectErrorOnDirective},
+			{"pcre", expectErrorOnDirective},
+			{"re2", func(w *corazawaf.WAF) bool { return w.RxRE2 }},
+			{"RE2", func(w *corazawaf.WAF) bool { return w.RxRE2 }},
+			{"stdlib", func(w *corazawaf.WAF) bool { return !w.RxRE2 }},
+		},
 		"SecArgumentsLimit": {
 			{"", expectErrorOnDirective},
 			{"0", expectErrorOnDirective},

@@ -201,6 +201,7 @@ func (rp *RuleParser) ParseOperator(operator string) error {
 	if waf := rp.options.WAF; waf != nil {
 		opts.Memoizer = waf.Memoizer()
 		opts.RxPreFilterEnabled = waf.RxPreFilterEnabled
+		opts.RxRE2 = waf.RxRE2
 		if waf.RxPreFilterEnabled && waf.RxPreFilterVerify > 0 {
 			opts.RxPreFilterVerify = waf.RxPreFilterVerify
 			rule := rp.rule

@@ -84,13 +84,16 @@ type rxRegexp interface {
 	String() string
 }
 
-// compileRX compiles data with RE2 in Latin-1 mode, which reads the input as bytes
-// as ModSecurity's PCRE does: invalid UTF-8 cannot make a pattern fail, and a
-// counted repeat counts bytes. A pattern Latin-1 cannot express, such as one with
-// a code point above \xff, is compiled with Go's regexp instead.
-func compileRX(data string) (rxRegexp, error) {
-	if re, err := experimental.CompileLatin1(data); err == nil {
-		return re, nil
+// compileRX compiles data with Go's regexp, or with RE2 in Latin-1 mode when re2 is
+// set. Latin-1 reads the input as bytes, as ModSecurity's PCRE does: invalid UTF-8
+// cannot make a pattern fail, and a counted repeat counts bytes. A pattern Latin-1
+// cannot express, such as one with a code point above \xff, is compiled with Go's
+// regexp instead.
+func compileRX(data string, re2 bool) (rxRegexp, error) {
+	if re2 {
+		if re, err := experimental.CompileLatin1(data); err == nil {
+			return re, nil
+		}
 	}
 	re, err := regexp.Compile(data)
 	if err != nil {
@@ -125,12 +128,12 @@ func newRX(options plugintypes.OperatorOptions) (plugintypes.Operator, error) {
 	// unit. This avoids re-parsing the AST for minMatchLength/prefilterFunc when
 	// the same pattern appears in multiple rules.
 	//
-	// The prefilter flag is part of the key because the global cache is shared
-	// across all WAF instances: two WAFs with different SecRxPreFilter settings
-	// must not share a compiled artifact.
-	cacheKey := fmt.Sprintf("rx:%v:%s", options.RxPreFilterEnabled, data)
+	// The prefilter and engine flags are part of the key because the global cache
+	// is shared across all WAF instances: two WAFs with different SecRxPreFilter or
+	// SecRxEngine settings must not share a compiled artifact.
+	cacheKey := fmt.Sprintf("rx:%v:%v:%s", options.RxPreFilterEnabled, options.RxRE2, data)
 	compiled, err := memoizeDo(options.Memoizer, cacheKey, func() (any, error) {
-		re, err := compileRX(data)
+		re, err := compileRX(data, options.RxRE2)
 		if err != nil {
 			return nil, err
 		}

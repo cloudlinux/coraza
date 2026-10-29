@@ -1920,6 +1920,46 @@ func directiveSecRxPreFilterVerify(options *DirectiveOptions) error {
 	return nil
 }
 
+// Description: Selects the regular expression engine of the @rx operator.
+// Syntax: SecRxEngine stdlib|re2
+// Default: stdlib
+// ---
+// stdlib matches with Go's regexp package. re2 matches with RE2 (wasilibs/go-re2,
+// RE2 compiled to WebAssembly and translated to Go, without cgo) in Latin-1 mode,
+// which is usually several times faster on large inputs.
+//
+// Latin-1 mode reads the input as bytes, as ModSecurity's PCRE does, while stdlib
+// reads UTF-8 characters. The results differ only on multi-byte UTF-8 input: there
+// a counted repeat such as .{0,100} counts bytes rather than characters, a single .
+// or negated class matches one byte, and (?i) does not fold non-ASCII letters. A
+// pattern Latin-1 cannot express, such as one with a code point above \xff, uses
+// Go's regexp. Patterns that match arbitrary bytes use their own matcher with
+// either engine.
+//
+// Like SecRxPreFilter, it applies to the rules defined after it.
+//
+// **Warning:** This is an experimental feature.
+//
+// Example:
+// ```seclang
+// SecRxEngine re2
+// ```
+func directiveSecRxEngine(options *DirectiveOptions) error {
+	if len(options.Opts) == 0 {
+		return errEmptyOptions
+	}
+
+	switch strings.ToLower(options.Opts) {
+	case "stdlib":
+		options.WAF.RxRE2 = false
+	case "re2":
+		options.WAF.RxRE2 = true
+	default:
+		return errors.New("syntax error: SecRxEngine [stdlib|re2]")
+	}
+	return nil
+}
+
 func parseBoolean(data string) (bool, error) {
 	data = strings.ToLower(data)
 	switch data {

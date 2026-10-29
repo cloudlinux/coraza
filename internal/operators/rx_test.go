@@ -15,10 +15,12 @@ import (
 )
 
 func TestRx(t *testing.T) {
+	// A row runs under both engines unless engine names one.
 	tests := []struct {
 		pattern string
 		input   string
 		want    bool
+		engine  string
 	}{
 		{
 			pattern: "som(.*)ta",
@@ -122,36 +124,60 @@ func TestRx(t *testing.T) {
 			input:   "test\nHELLO\nworld",
 			want:    true,
 		},
+		{
+			// stdlib counts UTF-8 characters: 日 is one.
+			pattern: `^.{3}$`,
+			input:   "日",
+			want:    false,
+			engine:  "stdlib",
+		},
+		{
+			// re2 counts bytes, as ModSecurity does: 日 is three.
+			pattern: `^.{3}$`,
+			input:   "日",
+			want:    true,
+			engine:  "re2",
+		},
+		{
+			// Latin-1 cannot express \x{30cf}, so re2 falls back to Go's regexp.
+			pattern: `\x{30cf}`,
+			input:   "ハロー",
+			want:    true,
+		},
 	}
 
-	for _, tc := range tests {
-		tt := tc
-		t.Run(fmt.Sprintf("%s/%s", tt.pattern, tt.input), func(t *testing.T) {
-
-			opts := plugintypes.OperatorOptions{
-				Arguments: tt.pattern,
+	for _, tt := range tests {
+		for _, engine := range []string{"stdlib", "re2"} {
+			if tt.engine != "" && tt.engine != engine {
+				continue
 			}
-			rx, err := newRX(opts)
-			if err != nil {
-				t.Error(err)
-			}
-			waf := corazawaf.NewWAF()
-			tx := waf.NewTransaction()
-			tx.Capture = true
-			res := rx.Evaluate(tx, tt.input)
-			if res != tt.want {
-				t.Errorf("want %v, got %v", tt.want, res)
-			}
-			/*
-				vars := tx.GetCollection(variables.TX).Data()
-				if vars["0"][0] != "somedata" {
-					t.Error("rx1 failed")
+			t.Run(fmt.Sprintf("%s/%s/%s", engine, tt.pattern, tt.input), func(t *testing.T) {
+				opts := plugintypes.OperatorOptions{
+					Arguments: tt.pattern,
+					RxRE2:     engine == "re2",
 				}
-				if vars["1"][0] != "eda" {
-					t.Error("rx1 failed")
+				rx, err := newRX(opts)
+				if err != nil {
+					t.Error(err)
 				}
-			*/
-		})
+				waf := corazawaf.NewWAF()
+				tx := waf.NewTransaction()
+				tx.Capture = true
+				res := rx.Evaluate(tx, tt.input)
+				if res != tt.want {
+					t.Errorf("want %v, got %v", tt.want, res)
+				}
+				/*
+					vars := tx.GetCollection(variables.TX).Data()
+					if vars["0"][0] != "somedata" {
+						t.Error("rx1 failed")
+					}
+					if vars["1"][0] != "eda" {
+						t.Error("rx1 failed")
+					}
+				*/
+			})
+		}
 	}
 }
 
