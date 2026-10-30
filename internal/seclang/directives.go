@@ -1938,6 +1938,11 @@ func directiveSecRxPreFilterVerify(options *DirectiveOptions) error {
 //
 // Like SecRxPreFilter, it applies to the rules defined after it.
 //
+// go-re2 is linked into every build, whatever this directive selects, and needs
+// Go 1.26. On wasm targets, including TinyGo builds such as proxy-wasm filters, it
+// adds about 11 MB to the binary, and the first re2 compile allocates 1 GiB of
+// linear memory up front, so keep stdlib there.
+//
 // **Warning:** This is an experimental feature.
 //
 // Example:
