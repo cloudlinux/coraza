@@ -12,10 +12,7 @@ import (
 	"github.com/corazawaf/coraza/v3/experimental/plugins/plugintypes"
 )
 
-// TestJSONArgumentsLimitMatchesModSecurity runs JSON bodies around
-// SecArgumentsLimit through a deny rule on REQBODY_ERROR. The expected ARGS
-// counts and verdicts were measured on ModSecurity 2.9.7 (Debian 12 package)
-// with the same rules and the default limit of 1000.
+// Expected values were measured on ModSecurity 2.9.7 with the same rules.
 func TestJSONArgumentsLimitMatchesModSecurity(t *testing.T) {
 	waf, err := NewWAF(NewWAFConfig().WithDirectives(`
 SecRuleEngine On

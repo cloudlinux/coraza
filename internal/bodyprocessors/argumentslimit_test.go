@@ -673,8 +673,7 @@ func TestMultipartTempFileAlwaysRegistered(t *testing.T) {
 	}
 }
 
-// TestJSONFlattenBudgetError asserts that the flatten byte budget names itself
-// instead of pointing at SecArgumentsLimit.
+// TestJSONFlattenBudgetError: the byte budget error names itself.
 func TestJSONFlattenBudgetError(t *testing.T) {
 	body := strings.Builder{}
 	body.WriteString(`[{"`)
@@ -862,7 +861,6 @@ func TestJSONResponseDepthLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Empty arrays carry no values, so only the depth limit decides.
 	body := strings.Repeat("[", 50) + strings.Repeat("]", 50)
 
 	v := corazawaf.NewTransactionVariables(persistence.NoopEngine{})
@@ -1099,9 +1097,7 @@ func TestScaledBudgetsDoNotOverflow(t *testing.T) {
 	}
 }
 
-// TestJSONSiblingArraysCountOnlyTheirValues asserts that a body whose scalars
-// are spread over many sibling arrays, exactly ArgumentLimit of them, is
-// accepted and stores exactly those values: an array adds no length entry.
+// TestJSONSiblingArraysCountOnlyTheirValues: arrays add no length entry.
 func TestJSONSiblingArraysCountOnlyTheirValues(t *testing.T) {
 	bp, err := bodyprocessors.GetBodyProcessor("json")
 	if err != nil {
@@ -1217,10 +1213,7 @@ func TestScaledBudgetsHaveLiteralAnchors(t *testing.T) {
 	})
 }
 
-// TestJSONArgumentFreeBodiesAreNotDenied asserts that a body carrying no
-// arguments is not reported as truncated at any depth within the recursion
-// limit. ModSecurity counts zero arguments for it, so a rule written against
-// REQBODY_ERROR must not deny it.
+// TestJSONArgumentFreeBodiesAreNotDenied: a body without values never trips the limit.
 func TestJSONArgumentFreeBodiesAreNotDenied(t *testing.T) {
 	bp, err := bodyprocessors.GetBodyProcessor("json")
 	if err != nil {

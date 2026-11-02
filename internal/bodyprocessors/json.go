@@ -159,10 +159,7 @@ var errFlattenBudget = errors.New("flattened json exceeds its byte budget")
 // RESPONSE_ARGS -- without bound regardless of SecArgumentsLimit, exhausting
 // memory on a single request. See GHSA-3ww9-vw83-9w5x.
 //
-// As in ModSecurity, the argumentsUsed arguments the request already holds
-// count toward argumentLimit, and an array adds its values but no length
-// entry. truncated reports the argument limit; outgrowing the byte budget is
-// an error, since raising SecArgumentsLimit does not help with it.
+// argumentsUsed counts toward argumentLimit, as in ModSecurity.
 func readJSON(s string, maxRecursion, argumentLimit, argumentsUsed int) (res map[string][]string, truncated bool, err error) {
 	res = make(map[string][]string)
 	key := []byte("json")
@@ -192,16 +189,11 @@ func readJSON(s string, maxRecursion, argumentLimit, argumentsUsed int) (res map
 	if err != nil {
 		return res, truncated, err
 	}
-	// ModSecurity stops parsing at the argument limit, so the rest of the body
-	// is neither walked nor validated here either. That also keeps gjson.Valid
-	// off a deep tail the walk never reached (GHSA-6gcq-wc29-5xf2).
+	// Like ModSecurity, stop at the limit; the rest is not validated.
 	if truncated {
 		return res, true, nil
 	}
-	// gjson.Valid recurses with no depth bound (validany -> validarray/
-	// validobject in gjson v1.18.0) and crashes the process with an
-	// unrecoverable stack overflow on deep enough input. This iterative check
-	// bounds that recursion before Valid ever runs. See GHSA-6gcq-wc29-5xf2.
+	// gjson.Valid recurses without a depth bound (GHSA-6gcq-wc29-5xf2).
 	if jsonNestingExceedsLimit(s, maxRecursion) {
 		return res, truncated, jsonLimitError("max recursion reached while reading json object")
 	}
@@ -300,8 +292,7 @@ func readItems(json gjson.Result, objKey []byte, maxRecursion int, argumentLimit
 			val = value.Raw
 		}
 
-		// Checked only when a value is about to be added, as in ModSecurity:
-		// containers after the last value that fits, empty or not, do not trip it.
+		// As in ModSecurity, only a value past the limit trips it.
 		if argumentLimit > 0 && *argCount >= argumentLimit {
 			truncated = true
 			return false
