@@ -479,12 +479,7 @@ func TestJSONNestingExceedsLimit(t *testing.T) {
 	}
 }
 
-// TestReadJSONDeepTailAfterArgumentLimit is a regression test for
-// GHSA-6gcq-wc29-5xf2: a tail nested past the recursion limit, hidden after
-// the scalars that exhaust argumentLimit, must never reach gjson.Valid, which
-// recurses with no depth bound and crashes the process on a deep enough tail.
-// Here the nesting is kept small enough to stay safe to run in the normal
-// suite; the mechanism is identical regardless of depth.
+// GHSA-6gcq-wc29-5xf2: a deep tail after the limit must never reach gjson.Valid.
 func TestReadJSONDeepTailAfterArgumentLimit(t *testing.T) {
 	const limit = 50
 	depth := limit*2 + 20 // comfortably past the recursion limit
@@ -495,7 +490,6 @@ func TestReadJSONDeepTailAfterArgumentLimit(t *testing.T) {
 	}
 
 	t.Run("limit trips before the tail", func(t *testing.T) {
-		// The walk stops at the limit; the tail is neither walked nor validated.
 		_, truncated, err := readJSON(body(limit+1), limit, limit, 0)
 		if !truncated {
 			t.Error("expected truncated to be true")
@@ -506,9 +500,6 @@ func TestReadJSONDeepTailAfterArgumentLimit(t *testing.T) {
 	})
 
 	t.Run("tail reached at exactly the limit", func(t *testing.T) {
-		// The limit trips only when a value would be added, so the walk reaches
-		// the tail and its own recursion guard reports it, as ModSecurity
-		// reports its depth limit.
 		_, truncated, err := readJSON(body(limit), limit, limit, 0)
 		if truncated {
 			t.Error("expected truncated to be false")
@@ -520,8 +511,6 @@ func TestReadJSONDeepTailAfterArgumentLimit(t *testing.T) {
 	})
 }
 
-// TestReadJSONCountsArgumentsAlreadyUsed covers argumentsUsed: arguments the
-// request already holds count toward the limit, as ModSecurity counts ARGS.
 func TestReadJSONCountsArgumentsAlreadyUsed(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -599,9 +588,6 @@ func BenchmarkReadJSONArgumentLimit(b *testing.B) {
 	})
 }
 
-// TestReadJSONArraysAddNoLengthEntries pins ModSecurity's behaviour: an array
-// contributes its values and nothing else, and the argument limit trips only
-// when a value would be added past it.
 func TestReadJSONArraysAddNoLengthEntries(t *testing.T) {
 	// Small enough to stay under the byte budget.
 	const limit = 5
@@ -636,7 +622,7 @@ func TestReadJSONArraysAddNoLengthEntries(t *testing.T) {
 			wantValues: limit,
 		},
 		{
-			// GHSA-6r3q-mjv7-xr8m: retained ~4 MB through length entries.
+			// GHSA-6r3q-mjv7-xr8m
 			name: "long key under many empty arrays",
 			body: `{"` + strings.Repeat("a", 20000) + `":` + strings.Repeat("[", 200) + strings.Repeat("]", 200) + `}`,
 		},

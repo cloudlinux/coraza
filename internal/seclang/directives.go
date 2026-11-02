@@ -1786,9 +1786,8 @@ func directiveSecDataset(options *DirectiveOptions) error {
 // member costs, and how the budget relates to this limit, differ per processor:
 //   - urlencoded: ARGS_POST values, one member each, capped at this limit.
 //   - json: ARGS_POST (request) / RESPONSE_ARGS (response) flattened leaves,
-//     one member each. As in ModSecurity, a request body shares this limit
-//     with the ARGS_GET and ARGS_PATH values already held, so it adds only
-//     what is left of it, and an array adds its values but no length entry.
+//     one member each, sharing this limit with ARGS_GET and ARGS_PATH as
+//     ModSecurity does. Arrays add no length entry.
 //   - xml: REQUEST_XML attribute values and element text nodes share a budget
 //     of this limit scaled by MaxNodesPerArgument, which documents the scale
 //     (internal/bodyprocessors/xml.go).
