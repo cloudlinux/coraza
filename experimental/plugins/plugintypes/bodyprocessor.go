@@ -31,6 +31,10 @@ type BodyProcessorOptions struct {
 	// for a collection whose members are not arguments; a value <= 0 means
 	// unlimited
 	ArgumentLimit int
+	// ArgumentsUsed is how many arguments the request already holds when its
+	// body is processed (ARGS_GET and ARGS_PATH). The JSON processor charges
+	// them against ArgumentLimit, as ModSecurity does for ARGS.
+	ArgumentsUsed int
 }
 
 // BodyProcessor interface is used to create

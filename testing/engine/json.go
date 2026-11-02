@@ -37,13 +37,13 @@ var _ = profile.RegisterProfile(profile.Profile{
 								1100,
 								1101,
 								1102,
-								1010,
 								1000,
 								1011,
 							},
 							NonTriggeredRules: []int{
 								1111,
 								103,
+								1010,
 							},
 							Headers: map[string]string{
 								"Content-Type": "application/json",
@@ -105,7 +105,6 @@ var _ = profile.RegisterProfile(profile.Profile{
 								1100,
 								1101,
 								1104,
-								1010,
 								1000,
 								1011,
 								1111,
@@ -114,6 +113,7 @@ var _ = profile.RegisterProfile(profile.Profile{
 							},
 							NonTriggeredRules: []int{
 								103,
+								1010,
 								1102,
 								1103,
 								1202,
@@ -182,8 +182,8 @@ var _ = profile.RegisterProfile(profile.Profile{
 								"content-type": "application/json",
 							},
 							// ~4 MB flattened from about 200 arguments, against a 160 KB budget.
-							Data: `{"first":"kept","` + strings.Repeat("a", 20000) + `":` +
-								strings.Repeat("[", 200) + "1" + strings.Repeat("]", 200) + `}`,
+							Data: `{"first":"kept","` + strings.Repeat("a", 20000) + `":[` +
+								strings.Repeat("1,", 199) + "1]}",
 						},
 						Output: profile.ExpectedOutput{
 							TriggeredRules:    []int{100, 200002, 1100},
