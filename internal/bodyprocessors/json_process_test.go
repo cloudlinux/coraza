@@ -52,7 +52,6 @@ func TestJSONProcessRequestPopulatesArgsPost(t *testing.T) {
 	want := map[string]string{
 		"json.a":   "1",
 		"json.b":   "two",
-		"json.c":   "2", // array length
 		"json.c.0": "10",
 		"json.c.1": "20",
 	}
@@ -255,7 +254,6 @@ func TestJSONProcessResponsePopulatesResponseArgs(t *testing.T) {
 	want := map[string]string{
 		"json.a":   "1",
 		"json.b":   "two",
-		"json.c":   "2", // array length
 		"json.c.0": "10",
 		"json.c.1": "20",
 	}

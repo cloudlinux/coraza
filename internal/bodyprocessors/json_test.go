@@ -55,16 +55,11 @@ var jsonTests = []struct {
 		want: map[string]string{
 			"json.a":         "1",
 			"json.b":         "2",
-			"json.c":         "3",
 			"json.c.0":       "1",
 			"json.c.1":       "2",
 			"json.c.2":       "3",
 			"json.d.a.b":     "1",
-			"json.e":         "1",
 			"json.e.0.a":     "1",
-			"json.f":         "1",
-			"json.f.0":       "1",
-			"json.f.0.0":     "1",
 			"json.f.0.0.0.z": "abc",
 		},
 		err: nil,
@@ -110,22 +105,14 @@ var jsonTests = []struct {
     }
 ]`,
 		want: map[string]string{
-			"json":             "2",
-			"json.0":           "1",
-			"json.0.0":         "1",
 			"json.0.0.0.q":     "1",
 			"json.1.a":         "1",
 			"json.1.b":         "2",
-			"json.1.c":         "3",
 			"json.1.c.0":       "1",
 			"json.1.c.1":       "2",
 			"json.1.c.2":       "3",
 			"json.1.d.a.b":     "1",
-			"json.1.e":         "1",
 			"json.1.e.0.a":     "1",
-			"json.1.f":         "1",
-			"json.1.f.0":       "1",
-			"json.1.f.0.0":     "1",
 			"json.1.f.0.0.0.z": "abc",
 		},
 		err: nil,
@@ -146,7 +133,6 @@ var jsonTests = []struct {
 			"json.test4":   "3",
 			"json.test":    "123",
 			"json.test2":   "456",
-			"json.test3":   "3",
 		},
 		err: nil,
 	},
@@ -205,7 +191,7 @@ var jsonTests = []struct {
 // properties to the backend. Both values must survive under the same key.
 func TestReadJSONKeyCollisionPreservesBothValues(t *testing.T) {
 	json := `{"account":{"role":"ATTACK"},"account.role":"SAFE"}`
-	got, _, err := readJSON(json, maxRecursion, 0)
+	got, _, err := readJSON(json, maxRecursion, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +219,7 @@ func TestReadJSON(t *testing.T) {
 				t.Log("deep recursion crashes the TinyGo test binary, row not run")
 				return
 			}
-			jsonMap, _, err := readJSON(tt.json, maxRecursion, 0)
+			jsonMap, _, err := readJSON(tt.json, maxRecursion, 0, 0)
 
 			// Special case for nested_empty - just check that the function doesn't error
 			if tt.name == "nested_empty" {
@@ -280,7 +266,7 @@ func mapKeys(m map[string][]string) []string {
 }
 
 func TestInvalidJSON(t *testing.T) {
-	_, _, err := readJSON(`{invalid json`, maxRecursion, 0)
+	_, _, err := readJSON(`{invalid json`, maxRecursion, 0, 0)
 	if err == nil {
 		// We expect an error for invalid JSON since we now validate
 		t.Error("Expected error for invalid JSON, got nil")
@@ -290,7 +276,7 @@ func TestInvalidJSON(t *testing.T) {
 // Not a jsonTests row: maxRecursion is shared across all rows in that table,
 // so a negative-limit case can't be expressed as one.
 func TestReadJSONNegativeRecursionLimit(t *testing.T) {
-	_, _, err := readJSON(`{"a": 1}`, -1, 0)
+	_, _, err := readJSON(`{"a": 1}`, -1, 0, 0)
 	want := "max recursion reached while reading json object"
 	if err == nil || err.Error() != want {
 		t.Errorf("want error %q, got %v", want, err)
@@ -302,7 +288,7 @@ func BenchmarkReadJSON(b *testing.B) {
 		tt := tc
 		b.Run(tt.name, func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				_, _, err := readJSON(tt.json, maxRecursion, 0)
+				_, _, err := readJSON(tt.json, maxRecursion, 0, 0)
 				if err != nil {
 					b.Error(err)
 				}
@@ -317,7 +303,7 @@ func readJSONNoValidation(s string, maxRecursion int) (map[string][]string, erro
 	json := gjson.Parse(s)
 	res := make(map[string][]string)
 	key := []byte("json")
-	_, err := readItems(json, key, maxRecursion, 0, 0, new(int), new(int), new(int), res)
+	_, err := readItems(json, key, maxRecursion, 0, 0, new(int), new(int), res)
 	return res, err
 }
 
@@ -363,7 +349,7 @@ func BenchmarkValidationOverhead(b *testing.B) {
 		b.Run("WithValidation/"+bc.name, func(b *testing.B) {
 			b.SetBytes(int64(len(bc.json)))
 			for i := 0; i < b.N; i++ {
-				if _, _, err := readJSON(bc.json, maxRecursion, 0); err != nil {
+				if _, _, err := readJSON(bc.json, maxRecursion, 0, 0); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -394,16 +380,15 @@ func TestReadJSONArgumentLimit(t *testing.T) {
 	}
 	sb.WriteString("]")
 
-	res, truncated, err := readJSON(sb.String(), maxRecursion, 1000)
+	res, truncated, err := readJSON(sb.String(), maxRecursion, 1000, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !truncated {
 		t.Error("expected truncated to be true")
 	}
-	// +1 for the "json" key holding the array length summary entry.
-	if len(res) > 1001 {
-		t.Errorf("expected at most ~1000 entries, got %d", len(res))
+	if len(res) != 1000 {
+		t.Errorf("expected 1000 entries, got %d", len(res))
 	}
 }
 
@@ -420,7 +405,7 @@ func TestReadJSONArgumentLimitNested(t *testing.T) {
 	}
 	sb.WriteString(`]}}`)
 
-	res, truncated, err := readJSON(sb.String(), maxRecursion, 1000)
+	res, truncated, err := readJSON(sb.String(), maxRecursion, 1000, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,7 +436,7 @@ func TestReadJSONArgumentLimitCountsCollidedValues(t *testing.T) {
 	}
 	sb.WriteString("}")
 
-	res, truncated, err := readJSON(sb.String(), maxRecursion, limit)
+	res, truncated, err := readJSON(sb.String(), maxRecursion, limit, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -494,44 +479,85 @@ func TestJSONNestingExceedsLimit(t *testing.T) {
 	}
 }
 
-// TestReadJSONArgumentLimitTruncationEnforcesRecursionLimit is a regression
-// test for GHSA-6gcq-wc29-5xf2: when argumentLimit truncates the walk before
-// it ever reaches a deeply nested tail, readItems's own recursion guard
-// never fires for that tail (it is simply never visited). Before the fix,
-// readJSON then fell through to an unconditional gjson.Valid(s) call, which
-// recurses with no depth bound and -- on a sufficiently deep tail --
-// crashes the process with an unrecoverable stack overflow instead of
-// returning an error. Here the nesting is kept small enough to stay safe to
-// run in the normal suite; the mechanism is identical regardless of depth.
-func TestReadJSONArgumentLimitTruncationEnforcesRecursionLimit(t *testing.T) {
+// TestReadJSONDeepTailAfterArgumentLimit is a regression test for
+// GHSA-6gcq-wc29-5xf2: a tail nested past the recursion limit, hidden after
+// the scalars that exhaust argumentLimit, must never reach gjson.Valid, which
+// recurses with no depth bound and crashes the process on a deep enough tail.
+// Here the nesting is kept small enough to stay safe to run in the normal
+// suite; the mechanism is identical regardless of depth.
+func TestReadJSONDeepTailAfterArgumentLimit(t *testing.T) {
 	const limit = 50
 	depth := limit*2 + 20 // comfortably past the recursion limit
 
-	var sb strings.Builder
-	sb.WriteString("[")
-	for i := 0; i < limit; i++ {
-		sb.WriteString("1,")
+	body := func(scalars int) string {
+		return "[" + strings.Repeat("1,", scalars) +
+			strings.Repeat("[", depth) + "1" + strings.Repeat("]", depth) + "]"
 	}
-	// A single element that is itself nested past the limit, hidden right
-	// after the scalars that exhaust argumentLimit: readItems's ForEach
-	// stops before ever recursing into it.
-	sb.WriteString(strings.Repeat("[", depth))
-	sb.WriteString("1")
-	sb.WriteString(strings.Repeat("]", depth))
-	sb.WriteString("]")
 
-	_, truncated, err := readJSON(sb.String(), limit, limit)
-	if !truncated {
-		t.Error("expected truncated to be true")
+	t.Run("limit trips before the tail", func(t *testing.T) {
+		// The walk stops at the limit; the tail is neither walked nor validated.
+		_, truncated, err := readJSON(body(limit+1), limit, limit, 0)
+		if !truncated {
+			t.Error("expected truncated to be true")
+		}
+		if err != nil {
+			t.Errorf("want no error after the argument limit stopped the walk, got %v", err)
+		}
+	})
+
+	t.Run("tail reached at exactly the limit", func(t *testing.T) {
+		// The limit trips only when a value would be added, so the walk reaches
+		// the tail and its own recursion guard reports it, as ModSecurity
+		// reports its depth limit.
+		_, truncated, err := readJSON(body(limit), limit, limit, 0)
+		if truncated {
+			t.Error("expected truncated to be false")
+		}
+		want := "max recursion reached while reading json object"
+		if err == nil || err.Error() != want {
+			t.Errorf("want error %q, got %v", want, err)
+		}
+	})
+}
+
+// TestReadJSONCountsArgumentsAlreadyUsed covers argumentsUsed: arguments the
+// request already holds count toward the limit, as ModSecurity counts ARGS.
+func TestReadJSONCountsArgumentsAlreadyUsed(t *testing.T) {
+	tests := []struct {
+		name          string
+		body          string
+		limit, used   int
+		wantValues    int
+		wantTruncated bool
+	}{
+		{name: "body fills the rest", body: `{"a":[1,2]}`, limit: 5, used: 3, wantValues: 2},
+		{name: "body over the rest", body: `{"a":[1,2,3]}`, limit: 5, used: 3, wantValues: 2, wantTruncated: true},
+		{name: "limit already reached, value", body: `{"a":1}`, limit: 5, used: 5, wantTruncated: true},
+		{name: "limit already reached, no value", body: `{"a":{},"b":[]}`, limit: 5, used: 5},
+		{name: "no limit", body: `{"a":[1,2,3]}`, limit: 0, used: 5000, wantValues: 3},
 	}
-	want := "max recursion reached while reading json object"
-	if err == nil || err.Error() != want {
-		t.Errorf("want error %q, got %v", want, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res, truncated, err := readJSON(tt.body, maxRecursion, tt.limit, tt.used)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if truncated != tt.wantTruncated {
+				t.Errorf("truncated = %v, want %v", truncated, tt.wantTruncated)
+			}
+			total := 0
+			for _, values := range res {
+				total += len(values)
+			}
+			if total != tt.wantValues {
+				t.Errorf("got %d values, want %d", total, tt.wantValues)
+			}
+		})
 	}
 }
 
 func TestReadJSONNoArgumentLimit(t *testing.T) {
-	res, truncated, err := readJSON(`{"a":1,"b":2,"c":3}`, maxRecursion, 0)
+	res, truncated, err := readJSON(`{"a":1,"b":2,"c":3}`, maxRecursion, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -558,7 +584,7 @@ func BenchmarkReadJSONArgumentLimit(b *testing.B) {
 	b.Run("limit=1000", func(b *testing.B) {
 		b.SetBytes(int64(len(json)))
 		for i := 0; i < b.N; i++ {
-			if _, _, err := readJSON(json, maxRecursion, 1000); err != nil {
+			if _, _, err := readJSON(json, maxRecursion, 1000, 0); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -566,71 +592,59 @@ func BenchmarkReadJSONArgumentLimit(b *testing.B) {
 	b.Run("no_limit", func(b *testing.B) {
 		b.SetBytes(int64(len(json)))
 		for i := 0; i < b.N; i++ {
-			if _, _, err := readJSON(json, maxRecursion, 0); err != nil {
+			if _, _, err := readJSON(json, maxRecursion, 0, 0); err != nil {
 				b.Fatal(err)
 			}
 		}
 	})
 }
 
-// TestReadJSONArrayLengthRespectsArgumentLimit covers the entry written after
-// ForEach returns, outside the guards inside the callback. Every array level
-// added one entry past SecArgumentsLimit and left truncated false, so 1024
-// nested arrays in a 2 KB body produced 1025 arguments and the deny rule that
-// depends on the flag never fired.
-func TestReadJSONArrayLengthRespectsArgumentLimit(t *testing.T) {
+// TestReadJSONArraysAddNoLengthEntries pins ModSecurity's behaviour: an array
+// contributes its values and nothing else, and the argument limit trips only
+// when a value would be added past it.
+func TestReadJSONArraysAddNoLengthEntries(t *testing.T) {
 	// Small enough to stay under the byte budget.
 	const limit = 5
 
 	exactArray := "[" + strings.Repeat("1,", limit-1) + "1]"
 
-	var padded strings.Builder
-	padded.WriteString("{")
-	for i := 0; i < limit; i++ {
-		padded.WriteString(`"p` + strconv.Itoa(i) + `":[{}],`)
-	}
-	padded.WriteString(`"items":[1,2,3]}`)
-
 	tests := []struct {
 		name          string
 		body          string
 		wantTruncated bool
-		wantValues    int // total values in the result; 0 skips the check
+		wantValues    int
 	}{
 		{
-			// 1 value plus limit length entries.
-			name:          "deeply nested arrays",
-			body:          strings.Repeat("[", 20) + "1" + strings.Repeat("]", 20),
-			wantTruncated: true,
-			wantValues:    limit + 1,
+			name:       "deeply nested arrays",
+			body:       strings.Repeat("[", 20) + "1" + strings.Repeat("]", 20),
+			wantValues: 1,
 		},
 		{
-			// The length entry does not count toward the limit.
-			name:          "array of exactly the limit",
-			body:          exactArray,
-			wantTruncated: false,
-			wantValues:    limit + 1,
+			name:       "array of exactly the limit",
+			body:       exactArray,
+			wantValues: limit,
 		},
 		{
-			// The partial length is not written.
 			name:          "array longer than the limit",
 			body:          "[" + strings.Repeat("1,", limit) + "1]",
 			wantTruncated: true,
 			wantValues:    limit,
 		},
 		{
-			// The padding fills the length cap, so the items length is
-			// dropped and truncated is set.
-			name:          "length entries padded by empty-object arrays",
-			body:          padded.String(),
-			wantTruncated: true,
-			wantValues:    limit + 3,
+			name:       "empty containers after the limit",
+			body:       `{"a":` + exactArray + strings.Repeat(`,"p":[{}]`, limit) + `}`,
+			wantValues: limit,
+		},
+		{
+			// GHSA-6r3q-mjv7-xr8m: retained ~4 MB through length entries.
+			name: "long key under many empty arrays",
+			body: `{"` + strings.Repeat("a", 20000) + `":` + strings.Repeat("[", 200) + strings.Repeat("]", 200) + `}`,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			res, truncated, err := readJSON(tt.body, 10000, limit)
+			res, truncated, err := readJSON(tt.body, 10000, limit, 0)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -641,10 +655,7 @@ func TestReadJSONArrayLengthRespectsArgumentLimit(t *testing.T) {
 			for _, values := range res {
 				total += len(values)
 			}
-			if total > 2*limit {
-				t.Errorf("got %d values, want at most %d (limit for real values plus limit for length entries)", total, 2*limit)
-			}
-			if tt.wantValues > 0 && total != tt.wantValues {
+			if total != tt.wantValues {
 				t.Errorf("got %d values, want %d", total, tt.wantValues)
 			}
 		})
@@ -679,19 +690,11 @@ func TestReadJSONBoundsFlattenedBytes(t *testing.T) {
 			name: "long paths rewritten per leaf",
 			body: longPaths.String(),
 		},
-		{
-			// GHSA-6r3q-mjv7-xr8m: the array-length entry written after each
-			// ForEach checked argumentLimit but not byteBudget. Every nesting
-			// level adds one argument but repeats the full ~20 KB path, so
-			// this ~20 KB body retained ~4 MB with truncated=false.
-			name: "long key under many single-element arrays",
-			body: `{"` + strings.Repeat("a", 20000) + `":` + strings.Repeat("[", 200) + strings.Repeat("]", 200) + `}`,
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			res, truncated, err := readJSON(tt.body, 10000, limit)
+			res, truncated, err := readJSON(tt.body, 10000, limit, 0)
 			if err == nil || !strings.Contains(err.Error(), "flattened form exceeds") {
 				t.Fatalf("expected the byte budget error, got %v", err)
 			}
@@ -737,7 +740,7 @@ func TestReadJSONLeavesOrdinaryPayloadsIntact(t *testing.T) {
 	}
 	sb.WriteString(`]}`)
 
-	res, truncated, err := readJSON(sb.String(), 10000, 1000)
+	res, truncated, err := readJSON(sb.String(), 10000, 1000, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

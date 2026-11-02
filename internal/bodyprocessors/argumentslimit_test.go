@@ -345,9 +345,8 @@ func TestJSONLargeBodiesAccepted(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("rejected a %d byte nested body: %v", body.Len(), err)
 		}
-		// 300 records x (id, payload, metadata.tag), plus the length of the
-		// records array.
-		if want, have := 901, len(v.ArgsPost().FindAll()); want != have {
+		// 300 records x (id, payload, metadata.tag).
+		if want, have := 900, len(v.ArgsPost().FindAll()); want != have {
 			t.Errorf("unexpected number of members, want %d, have %d", want, have)
 		}
 	})
@@ -674,10 +673,9 @@ func TestMultipartTempFileAlwaysRegistered(t *testing.T) {
 	}
 }
 
-// TestJSONTruncatedArrayLength asserts that stopping inside an array does not
-// record the array length under a path the document does not have, and that the
-// flatten byte budget names itself instead of pointing at SecArgumentsLimit.
-func TestJSONTruncatedArrayLength(t *testing.T) {
+// TestJSONFlattenBudgetError asserts that the flatten byte budget names itself
+// instead of pointing at SecArgumentsLimit.
+func TestJSONFlattenBudgetError(t *testing.T) {
 	body := strings.Builder{}
 	body.WriteString(`[{"`)
 	body.WriteString(strings.Repeat("K", 400))
@@ -703,43 +701,6 @@ func TestJSONTruncatedArrayLength(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "byte budget") {
 		t.Errorf("the flatten byte budget is not reported under its own name: %q", err)
-	}
-	// The enclosing array stopped on the error its element raised, so it has no
-	// length entry either.
-	if have := v.ArgsPost().Get("json"); len(have) != 0 {
-		t.Errorf("the enclosing array reports a length after stopping early: json = %q", have)
-	}
-}
-
-// TestJSONTruncatedArrayLengthNotRecorded asserts that an array whose iteration
-// stopped early records no length entry: the elements past the stop were never
-// counted, so any number written there would understate the array and let a
-// rule counting its size be talked down by a body shaped to trip the limit.
-func TestJSONTruncatedArrayLengthNotRecorded(t *testing.T) {
-	body := strings.Builder{}
-	body.WriteString(`{"a":[`)
-	for i := 0; i < 10; i++ {
-		if i > 0 {
-			body.WriteString(",")
-		}
-		fmt.Fprintf(&body, "%d", i)
-	}
-	body.WriteString("]}")
-
-	bp, err := bodyprocessors.GetBodyProcessor("json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	v := corazawaf.NewTransactionVariables(persistence.NoopEngine{})
-	err = bp.ProcessRequest(strings.NewReader(body.String()), v, plugintypes.BodyProcessorOptions{
-		RequestBodyRecursionLimit: 10,
-		ArgumentLimit:             5,
-	})
-	if !errors.Is(err, bodyprocessors.ErrArgumentsLimit) {
-		t.Fatalf("expected ErrArgumentsLimit, got %v", err)
-	}
-	if have := v.ArgsPost().Get("json.a"); len(have) != 0 {
-		t.Errorf("a truncated array reports a length, json.a = %q, the array holds 10 elements", have)
 	}
 }
 
@@ -901,8 +862,7 @@ func TestJSONResponseDepthLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 50 levels stay under upstream's flatten byte budget (see
-	// TestJSONArgumentFreeBodiesAreNotDenied), so only the depth limit decides.
+	// Empty arrays carry no values, so only the depth limit decides.
 	body := strings.Repeat("[", 50) + strings.Repeat("]", 50)
 
 	v := corazawaf.NewTransactionVariables(persistence.NoopEngine{})
@@ -1139,12 +1099,10 @@ func TestScaledBudgetsDoNotOverflow(t *testing.T) {
 	}
 }
 
-// TestJSONSiblingArrayLengthsNotCountedAsArguments asserts the array-length
-// exemption across several arrays rather than one. A body whose scalars are
-// spread over many sibling arrays carries one length entry per array, and if
-// any of them were charged as an argument the body would be denied while
-// holding exactly ArgumentLimit values.
-func TestJSONSiblingArrayLengthsNotCountedAsArguments(t *testing.T) {
+// TestJSONSiblingArraysCountOnlyTheirValues asserts that a body whose scalars
+// are spread over many sibling arrays, exactly ArgumentLimit of them, is
+// accepted and stores exactly those values: an array adds no length entry.
+func TestJSONSiblingArraysCountOnlyTheirValues(t *testing.T) {
 	bp, err := bodyprocessors.GetBodyProcessor("json")
 	if err != nil {
 		t.Fatal(err)
@@ -1171,8 +1129,7 @@ func TestJSONSiblingArrayLengthsNotCountedAsArguments(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("a body of exactly %d values was rejected: %v", limit, err)
 	}
-	// The scalars plus one length entry per array.
-	if want, have := limit+arrays, len(v.ArgsPost().FindAll()); want != have {
+	if want, have := limit, len(v.ArgsPost().FindAll()); want != have {
 		t.Errorf("unexpected number of members, want %d, have %d", want, have)
 	}
 }
@@ -1261,20 +1218,15 @@ func TestScaledBudgetsHaveLiteralAnchors(t *testing.T) {
 }
 
 // TestJSONArgumentFreeBodiesAreNotDenied asserts that a body carrying no
-// arguments is not reported as truncated at nesting depths real clients send.
-// Array lengths are metadata, so a body ModSecurity counts zero arguments for
-// must not be denied by a rule written against REQBODY_ERROR.
-//
-// Since the v3.8.1 sync the length entries are charged to upstream's flatten
-// byte budget (GHSA-6r3q-mjv7-xr8m), whose floor of 4096 bytes is outgrown by
-// arrays nested about 64 levels deep (path length is quadratic in depth), so
-// the former 100..1000 rows now end in a REQBODY_ERROR by design.
+// arguments is not reported as truncated at any depth within the recursion
+// limit. ModSecurity counts zero arguments for it, so a rule written against
+// REQBODY_ERROR must not deny it.
 func TestJSONArgumentFreeBodiesAreNotDenied(t *testing.T) {
 	bp, err := bodyprocessors.GetBodyProcessor("json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, depth := range []int{10, 50} {
+	for _, depth := range []int{10, 50, 100, 1000} {
 		t.Run(fmt.Sprintf("nested_arrays_%d", depth), func(t *testing.T) {
 			body := strings.Repeat("[", depth) + strings.Repeat("]", depth)
 			v := corazawaf.NewTransactionVariables(persistence.NoopEngine{})
@@ -1284,13 +1236,8 @@ func TestJSONArgumentFreeBodiesAreNotDenied(t *testing.T) {
 			}); err != nil {
 				t.Errorf("a %d byte body carrying no arguments was reported as truncated: %v", len(body), err)
 			}
-			// Dropping the entries that do not fit still bounds what is stored.
-			stored := 0
-			for _, m := range v.ArgsPost().FindAll() {
-				stored += len(m.Key()) + len(m.Value())
-			}
-			if maxStored := len(body) * 65; stored > maxStored {
-				t.Errorf("stored %d bytes from a %d byte body, the budget allows %d", stored, len(body), maxStored)
+			if have := len(v.ArgsPost().FindAll()); have != 0 {
+				t.Errorf("a body carrying no values stored %d members", have)
 			}
 		})
 	}

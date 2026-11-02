@@ -1360,6 +1360,7 @@ func (tx *Transaction) ProcessRequestBody() (*types.Interruption, error) {
 		StoragePath:               tx.WAF.UploadDir,
 		RequestBodyRecursionLimit: tx.WAF.RequestBodyJsonDepthLimit,
 		ArgumentLimit:             tx.WAF.ArgumentLimit,
+		ArgumentsUsed:             tx.variables.argsGet.TotalValues() + tx.variables.argsPath.TotalValues(),
 	}); err != nil {
 		switch {
 		case errors.Is(err, bodyprocessors.ErrArgumentsLimit):
