@@ -4,6 +4,9 @@
 package engine
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/corazawaf/coraza/v3/testing/profile"
 )
 
@@ -37,6 +40,15 @@ func sharedLimitTest(title, query, contentType, body string, deny bool) profile.
 			Output: out,
 		}}},
 	}
+}
+
+func multipartFields(n int) string {
+	var b strings.Builder
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&b, "--X\r\nContent-Disposition: form-data; name=\"k%d\"\r\n\r\nv\r\n", i)
+	}
+	b.WriteString("--X--\r\n")
+	return b.String()
 }
 
 var _ = profile.RegisterProfile(profile.Profile{
@@ -183,6 +195,10 @@ var _ = profile.RegisterProfile(profile.Profile{
 		sharedLimitTest("query at the limit, then a JSON value, blocks", "q0=v&q1=v&q2=v&q3=v&q4=v", "application/json", `{"a":1}`, true),
 		// Only a value trips the limit, so a body of empty containers passes.
 		sharedLimitTest("query at the limit, then a JSON body without values, passes", "q0=v&q1=v&q2=v&q3=v&q4=v", "application/json", `{"a":{},"b":[]}`, false),
+		sharedLimitTest("query and form fields fill the limit together", "q0=v&q1=v", "application/x-www-form-urlencoded", "k0=v&k1=v&k2=v", false),
+		sharedLimitTest("a form field past the shared limit blocks", "q0=v&q1=v", "application/x-www-form-urlencoded", "k0=v&k1=v&k2=v&k3=v", true),
+		sharedLimitTest("query and multipart fields fill the limit together", "q0=v&q1=v", "multipart/form-data; boundary=X", multipartFields(3), false),
+		sharedLimitTest("a multipart field past the shared limit blocks", "q0=v&q1=v", "multipart/form-data; boundary=X", multipartFields(4), true),
 	},
 	Rules: `
 SecRequestBodyAccess On

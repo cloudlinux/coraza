@@ -27,10 +27,11 @@ func (*urlencodedBodyProcessor) ProcessRequest(reader io.Reader, v plugintypes.T
 	v.RequestBodyLength().(*collections.Single).Set(strconv.Itoa(len(b)))
 	// Arguments are decoded in document order straight into ARGS_POST, so the
 	// limit truncates deterministically and arguments past it are never
-	// decoded.
+	// decoded. The count starts at the query arguments already held: ModSecurity
+	// keeps one argument table for every source.
 	argsCol := v.ArgsPost()
 	limit := options.ArgumentLimit
-	count := 0
+	count := options.ArgumentsUsed
 	overLimit := false
 	urlutil.EachQueryValue(b, '&', func(key, value string) bool {
 		if limit > 0 && count >= limit {

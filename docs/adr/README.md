@@ -133,6 +133,6 @@ Superseding does not delete the old record. Set its status and let the history s
 | [0062](0062-force-request-body-variable-raw-default.md) | [#28](https://github.com/cloudlinux/coraza/pull/28) | 2026-10-14 (expected) | unreleased | P | `ctl:forceRequestBodyVariable` falls back to the RAW processor |
 | [0063](0063-release-request-memory-between-phases.md) | [#33](https://github.com/cloudlinux/coraza/pull/33) | 2026-10-23 (expected) | unreleased | ⚡ | Release the transformation cache after each phase and drop large body buffers on Close |
 | [0064](0064-rx-prefilter-verify.md) | [#31](https://github.com/cloudlinux/coraza/pull/31) | 2026-10-29 | unreleased | F | `SecRxPreFilterVerify`: re-check a sample of `@rx` prefilter skips |
-| [0065](0065-json-arguments-like-modsecurity.md) | [#35](https://github.com/cloudlinux/coraza/pull/35) | 2026-11-02 | unreleased | P | The JSON body processor counts arguments like ModSecurity v2 |
+| [0065](0065-json-arguments-like-modsecurity.md) | [#35](https://github.com/cloudlinux/coraza/pull/35) | 2026-11-04 | unreleased | P | Request body arguments are counted like ModSecurity v2 |
 
 Categories: **F**eature · **P**arity · **⚡** Perf · **R**efactor
