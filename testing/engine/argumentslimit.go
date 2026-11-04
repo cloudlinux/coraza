@@ -7,10 +7,42 @@ import (
 	"github.com/corazawaf/coraza/v3/testing/profile"
 )
 
+// sharedLimitTest posts body after query. Rule 5 asserts that ARGS holds
+// exactly the limit: the query and body arguments were charged against one
+// budget, as in ModSecurity.
+func sharedLimitTest(title, query, contentType, body string, deny bool) profile.Test {
+	out := profile.ExpectedOutput{
+		TriggeredRules:    []int{5},
+		NonTriggeredRules: []int{1, 2},
+	}
+	if deny {
+		out = profile.ExpectedOutput{
+			TriggeredRules: []int{1, 2, 5},
+			Interruption: &profile.ExpectedInterruption{
+				Status: 400,
+				RuleID: 2,
+				Action: "deny",
+			},
+		}
+	}
+	return profile.Test{
+		Title: title,
+		Stages: []profile.Stage{{Stage: profile.SubStage{
+			Input: profile.StageInput{
+				URI:     "/?" + query,
+				Method:  "POST",
+				Headers: map[string]string{"content-type": contentType},
+				Data:    body,
+			},
+			Output: out,
+		}}},
+	}
+}
+
 var _ = profile.RegisterProfile(profile.Profile{
 	Meta: profile.Meta{
 		Author:      "quirky4",
-		Description: "Test that exceeding SecArgumentsLimit raises REQBODY_ERROR with the SecArgumentsLimit message and blocks",
+		Description: "Test that exceeding SecArgumentsLimit raises REQBODY_ERROR with the SecArgumentsLimit message and blocks, and that query and body arguments share the limit",
 		Enabled:     true,
 		Name:        "argumentslimit.yaml",
 	},
@@ -146,15 +178,21 @@ var _ = profile.RegisterProfile(profile.Profile{
 				},
 			},
 		},
+		sharedLimitTest("query and JSON values fill the limit together", "q0=v&q1=v", "application/json", `{"a":[0,1,2]}`, false),
+		sharedLimitTest("a JSON value past the shared limit blocks", "q0=v&q1=v", "application/json", `{"a":[0,1,2,3]}`, true),
+		sharedLimitTest("query at the limit, then a JSON value, blocks", "q0=v&q1=v&q2=v&q3=v&q4=v", "application/json", `{"a":1}`, true),
+		// Only a value trips the limit, so a body of empty containers passes.
+		sharedLimitTest("query at the limit, then a JSON body without values, passes", "q0=v&q1=v&q2=v&q3=v&q4=v", "application/json", `{"a":{},"b":[]}`, false),
 	},
 	Rules: `
 SecRequestBodyAccess On
 SecArgumentsLimit 5
-SecAction "id:100, phase:1, pass, log, ctl:requestBodyProcessor=JSON"
+SecRule REQUEST_HEADERS:Content-Type "@rx ^application/json" "id:100, phase:1, pass, log, ctl:requestBodyProcessor=JSON"
 SecRule REQBODY_ERROR_MSG "@streq SecArgumentsLimit exceeded" "id:1, phase:2, pass, log"
-# Declared before the denying rule so it evaluates on the stages that block:
+# Declared before the denying rule so they evaluate on the stages that block:
 # ARGS_POST is filled in phase 2, and rule 2 ends the transaction there.
 SecRule ARGS "@contains 1=1" "id:4, phase:2, pass, log"
+SecRule &ARGS "@eq 5" "id:5, phase:2, pass, log"
 SecRule REQBODY_ERROR "!@eq 0" "id:2, phase:2, deny, status:400, log"
 `,
 })
