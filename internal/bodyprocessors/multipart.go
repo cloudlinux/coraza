@@ -59,7 +59,8 @@ func (mbp *multipartBodyProcessor) ProcessRequest(reader io.Reader, v plugintype
 	// part costs one member for FILES, FILES_NAMES, FILES_SIZES and
 	// FILES_TMP_NAMES together, which are four views of the same part whose
 	// combined size SecRequestBodyLimit already bounds. ModSecurity charges file
-	// parts nothing at all. The budget is checked before reading a part's body,
+	// parts nothing at all. As in ModSecurity, the budget starts at the query
+	// arguments already held. The budget is checked before reading a part's body,
 	// so over-budget parts are never buffered and never create temp files.
 	// Part-header count is attacker-controlled and independent of argument
 	// content, so MULTIPART_PART_HEADERS gets its own separate budget: the
@@ -70,7 +71,7 @@ func (mbp *multipartBodyProcessor) ProcessRequest(reader io.Reader, v plugintype
 	// truncation is visible to the rules.
 	limit := options.ArgumentLimit
 	headerLimit := scaleArgumentLimit(limit, MaxHeadersPerPart)
-	members := 0
+	members := options.ArgumentsUsed
 	headerMembers := 0
 	headersOverLimit := false
 	for {
